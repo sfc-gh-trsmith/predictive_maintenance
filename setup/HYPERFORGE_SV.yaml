@@ -1,0 +1,772 @@
+name: HYPERFORGE_SV
+tables:
+  - name: AGG_ASSET_HOURLY_HEALTH
+    base_table:
+      database: HYPERFORGE
+      schema: GOLD
+      table: AGG_ASSET_HOURLY_HEALTH
+    dimensions:
+      - name: ASSET_ID
+        description: Unique identifier for an asset, used to track and monitor its health and performance over time.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+    time_dimensions:
+      - name: HOUR_TIMESTAMP
+        description: The timestamp representing the hour for which the asset health data is aggregated.
+        expr: HOUR_TIMESTAMP
+        data_type: TIMESTAMP_NTZ(9)
+        sample_values:
+          - 2025-09-22T10:00:00.000+0000
+          - 2025-09-22T11:00:00.000+0000
+          - 2025-09-23T08:00:00.000+0000
+    facts:
+      - name: AVG_FAILURE_PROBABILITY
+        description: The average probability of an asset failing within a given hour, expressed as a decimal value between 0 and 1, where 0 represents no probability of failure and 1 represents a 100% probability of failure.
+        expr: AVG_FAILURE_PROBABILITY
+        data_type: NUMBER(3,2)
+        sample_values:
+          - '0.03'
+          - '0.85'
+          - '0.02'
+      - name: AVG_TEMPERATURE_C
+        description: The average temperature in degrees Celsius of the asset over a one-hour period.
+        expr: AVG_TEMPERATURE_C
+        data_type: FLOAT
+        sample_values:
+          - '66.1'
+          - '75.8'
+          - '65.2'
+      - name: LATEST_HEALTH_SCORE
+        description: The LATEST_HEALTH_SCORE column represents the most recent health score of an asset, measured as a percentage, indicating the asset's current performance and operational status, with higher scores indicating better health.
+        expr: LATEST_HEALTH_SCORE
+        data_type: NUMBER(5,2)
+        sample_values:
+          - '98.50'
+          - '98.20'
+          - '35.10'
+      - name: MAX_VIBRATION_MM_S
+        description: Maximum vibration measured in millimeters per second.
+        expr: MAX_VIBRATION_MM_S
+        data_type: FLOAT
+        sample_values:
+          - '0.51'
+          - '0.55'
+          - '2.15'
+      - name: MIN_RUL_DAYS
+        description: Minimum Remaining Useful Life in Days, representing the estimated number of days until the asset is expected to reach the end of its useful life.
+        expr: MIN_RUL_DAYS
+        data_type: NUMBER(5,0)
+        sample_values:
+          - '365'
+          - '364'
+          - '400'
+      - name: STDDEV_PRESSURE_PSI
+        description: Standard Deviation of Pressure in Pounds per Square Inch, representing the variability of pressure readings for an asset over a one-hour period.
+        expr: STDDEV_PRESSURE_PSI
+        data_type: FLOAT
+        sample_values:
+          - '1.2'
+          - '1.1'
+          - '5.8'
+  - name: ML_FEATURE_STORE
+    base_table:
+      database: HYPERFORGE
+      schema: GOLD
+      table: ML_FEATURE_STORE
+    dimensions:
+      - name: FAILED_IN_NEXT_7_DAYS
+        description: Indicates whether the customer failed to make a payment within the next 7 days from the current date.
+        expr: FAILED_IN_NEXT_7_DAYS
+        data_type: BOOLEAN
+        sample_values:
+          - 'FALSE'
+          - 'TRUE'
+    facts:
+      - name: ASSET_ID
+        description: Unique identifier for a financial asset, such as a stock, bond, or commodity, used to track and analyze its performance and characteristics within the machine learning feature store.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: AVG_TEMP_LAST_24H
+        description: The average temperature over the last 24 hours.
+        expr: AVG_TEMP_LAST_24H
+        data_type: FLOAT
+        sample_values:
+          - '71.5'
+          - '68.8'
+      - name: CYCLES_SINCE_LAST_PM
+        description: The number of production cycles that have occurred since the last planned maintenance (PM) event.
+        expr: CYCLES_SINCE_LAST_PM
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '12000'
+          - '8500'
+      - name: DAYS_SINCE_LAST_FAILURE
+        description: The number of days since the last time a failure occurred.
+        expr: DAYS_SINCE_LAST_FAILURE
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '365'
+          - '180'
+      - name: DOWNTIME_IMPACT_RISK
+        description: The estimated financial impact of downtime on the organization, representing the potential loss in dollars per hour of system unavailability.
+        expr: DOWNTIME_IMPACT_RISK
+        data_type: NUMBER(12,2)
+        sample_values:
+          - '20000.00'
+          - '63750.00'
+      - name: OBSERVATION_DATE_SK
+        description: Unique identifier for the date of observation, in the format YYYYMMDD, used to track and analyze data over time.
+        expr: OBSERVATION_DATE_SK
+        data_type: NUMBER(8,0)
+        sample_values:
+          - '20250923'
+      - name: OEM_FAILURE_RATE_EST
+        description: Estimated rate of failures for original equipment manufacturer (OEM) parts, expressed as a decimal value between 0 and 1, where 0 represents no failures and 1 represents 100% failures.
+        expr: OEM_FAILURE_RATE_EST
+        data_type: FLOAT
+        sample_values:
+          - '0.15'
+          - '0.08'
+      - name: PRESSURE_TREND_7D
+        description: The average rate of change in pressure over the last 7 days.
+        expr: PRESSURE_TREND_7D
+        data_type: FLOAT
+        sample_values:
+          - '2.3'
+      - name: VIBRATION_STDDEV_7D
+        description: The standard deviation of vibration measurements over a 7-day period, indicating the variability or consistency of vibration levels over time.
+        expr: VIBRATION_STDDEV_7D
+        data_type: FLOAT
+        sample_values:
+          - '0.87'
+          - '0.12'
+  - name: DIM_ASSET
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_ASSET
+    dimensions:
+      - name: ASSET_CLASS_ID
+        description: A unique identifier for the asset class to which the asset belongs, used to categorize and group similar assets for reporting and analysis purposes.
+        expr: ASSET_CLASS_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+      - name: ASSET_ID
+        description: Unique identifier for an asset.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: ASSET_NAME
+        description: The name of the asset being monitored or tracked, such as a piece of equipment or machinery.
+        expr: ASSET_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - Primary Coolant Pump
+          - Conveyor Drive Motor
+      - name: ASSET_NK
+        description: Unique identifier for a specific asset, such as a piece of equipment or machinery, used to track and manage its performance, maintenance, and other relevant information.
+        expr: ASSET_NK
+        data_type: VARCHAR(50)
+        sample_values:
+          - EQ-PUMP-001
+          - EQ-MOTOR-007
+      - name: IS_CURRENT
+        description: Indicates whether the asset is currently active or in use.
+        expr: IS_CURRENT
+        data_type: BOOLEAN
+        sample_values:
+          - 'TRUE'
+      - name: LINE_ID
+        description: Unique identifier for a specific line or route in the transportation network.
+        expr: LINE_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '101'
+      - name: MODEL
+        description: The type of asset or equipment used in the organization, such as a specific model of pump or engine.
+        expr: MODEL
+        data_type: VARCHAR(50)
+        sample_values:
+          - IronHorse 75HP
+          - HydroFlow 5000
+      - name: OEM_NAME
+        description: The name of the original equipment manufacturer (OEM) that produced the asset.
+        expr: OEM_NAME
+        data_type: VARCHAR(50)
+        sample_values:
+          - FlowServe
+          - Siemens
+    time_dimensions:
+      - name: INSTALLATION_DATE
+        description: Date when the asset was installed.
+        expr: INSTALLATION_DATE
+        data_type: DATE
+        sample_values:
+          - '2021-11-20'
+          - '2022-01-15'
+      - name: SCD_END_DATE
+        description: The date when the asset's current state or version is no longer valid or effective.
+        expr: SCD_END_DATE
+        data_type: TIMESTAMP_NTZ(9)
+      - name: SCD_START_DATE
+        description: The date and time when the asset's current version became effective, marking the start of its validity period.
+        expr: SCD_START_DATE
+        data_type: TIMESTAMP_NTZ(9)
+        sample_values:
+          - 2022-01-15T00:00:00.000+0000
+          - 2021-11-20T00:00:00.000+0000
+    facts:
+      - name: DOWNTIME_IMPACT_PER_HOUR
+        description: The estimated financial impact or loss per hour of downtime for a specific asset.
+        expr: DOWNTIME_IMPACT_PER_HOUR
+        data_type: NUMBER(12,2)
+        sample_values:
+          - '7500.00'
+          - '5000.00'
+    primary_key:
+      columns:
+        - ASSET_ID
+  - name: DIM_ASSET_CLASS
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_ASSET_CLASS
+    dimensions:
+      - name: ASSET_CLASS_ID
+        description: Unique identifier for a category of assets, such as stocks, bonds, or real estate, used to classify and group similar assets for investment and reporting purposes.
+        expr: ASSET_CLASS_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: CLASS_NAME
+        description: The type of asset classification, which categorizes assets into distinct groups based on their functional characteristics, such as Static Equipment (e.g. tanks, vessels), Rotating Equipment (e.g. pumps, motors), and Electrical Systems (e.g. electrical panels, switchgear).
+        expr: CLASS_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - Static Equipment
+          - Rotating Equipment
+          - Electrical Systems
+    facts: []
+    primary_key:
+      columns:
+        - ASSET_CLASS_ID
+  - name: DIM_DATE
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_DATE
+    dimensions:
+      - name: DATE_SK
+        description: Unique identifier for a specific date, represented in the format YYYYMMDD, used to link date-related data across the data warehouse.
+        expr: DATE_SK
+        data_type: NUMBER(8,0)
+        sample_values:
+          - '20250922'
+          - '20250923'
+      - name: DAY_OF_WEEK
+        description: The day of the week on which a date falls, with possible values including Monday and Tuesday.
+        expr: DAY_OF_WEEK
+        data_type: VARCHAR(10)
+        sample_values:
+          - Monday
+          - Tuesday
+      - name: MONTH_NAME
+        description: The full name of the month, e.g. January, February, etc.
+        expr: MONTH_NAME
+        data_type: VARCHAR(10)
+        sample_values:
+          - September
+      - name: QUARTER
+        description: The quarter of the year in which a date falls, with possible values being 1 (January-March), 2 (April-June), 3 (July-September), or 4 (October-December).
+        expr: QUARTER
+        data_type: NUMBER(1,0)
+        sample_values:
+          - '3'
+      - name: YEAR
+        description: The calendar year in which a date falls.
+        expr: YEAR
+        data_type: NUMBER(4,0)
+        sample_values:
+          - '2025'
+    time_dimensions:
+      - name: FULL_DATE
+        description: Date of the transaction or event, represented in the format 'YYYY-MM-DD'.
+        expr: FULL_DATE
+        data_type: DATE
+        sample_values:
+          - '2025-09-22'
+          - '2025-09-23'
+    facts: []
+    primary_key:
+      columns:
+        - DATE_SK
+  - name: DIM_LINE
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_LINE
+    dimensions:
+      - name: LINE_ID
+        description: Unique identifier for a specific line in the production process.
+        expr: LINE_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '201'
+          - '101'
+          - '102'
+      - name: LINE_NAME
+        description: The name of the production or assembly line where the product is manufactured.
+        expr: LINE_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - Production Line B
+          - Assembly Line 1
+          - Production Line A
+      - name: PLANT_ID
+        description: Unique identifier for the plant where the production line is located.
+        expr: PLANT_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+          - '2'
+    facts:
+      - name: HOURLY_REVENUE
+        description: The total revenue generated by a specific line item within a one-hour time frame.
+        expr: HOURLY_REVENUE
+        data_type: NUMBER(10,2)
+        sample_values:
+          - '18000.00'
+          - '12000.00'
+          - '15000.00'
+    primary_key:
+      columns:
+        - LINE_ID
+  - name: DIM_PLANT
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_PLANT
+    dimensions:
+      - name: LOCATION
+        description: The physical location of the plant, including city and state.
+        expr: LOCATION
+        data_type: VARCHAR(100)
+        sample_values:
+          - Davidson NC
+          - Charlotte NC
+      - name: PLANT_ID
+        description: Unique identifier for a manufacturing plant or facility.
+        expr: PLANT_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: PLANT_NAME
+        description: The name of the manufacturing plant where the product is produced.
+        expr: PLANT_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - Davidson Manufacturing
+          - Charlotte Assembly
+    facts: []
+    primary_key:
+      columns:
+        - PLANT_ID
+  - name: DIM_SENSOR
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_SENSOR
+    dimensions:
+      - name: ASSET_ID
+        description: Unique identifier for a physical or logical asset being monitored by a sensor.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: SENSOR_NK
+        description: Sensor identifier, uniquely naming each sensor across all equipment, in the format "EQ-[Equipment Type]-[Equipment Number]-[Sensor Type]" where Equipment Type is the type of equipment the sensor is attached to, Equipment Number is the unique identifier of the equipment, and Sensor Type is the type of measurement the sensor is taking (e.g. VIB for vibration, PSI for pressure, TMP for temperature).
+        expr: SENSOR_NK
+        data_type: VARCHAR(50)
+        sample_values:
+          - EQ-PUMP-001-VIB
+          - EQ-PUMP-001-PSI
+          - EQ-PUMP-001-TMP
+      - name: SENSOR_SK
+        description: Unique identifier for a sensor in the fact table, used to link to the dimension table for additional sensor details.
+        expr: SENSOR_SK
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: SENSOR_TYPE
+        description: Type of sensor used to collect data, such as temperature, pressure, or vibration sensors.
+        expr: SENSOR_TYPE
+        data_type: VARCHAR(50)
+        sample_values:
+          - Temperature
+          - Pressure
+          - Vibration
+      - name: UNITS_OF_MEASURE
+        description: The unit of measurement for the sensor reading, such as temperature, pressure, or velocity.
+        expr: UNITS_OF_MEASURE
+        data_type: VARCHAR(20)
+        sample_values:
+          - Celsius
+          - PSI
+          - mm/s
+    facts: []
+    primary_key:
+      columns:
+        - SENSOR_SK
+  - name: DIM_WORK_ORDER_TYPE
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_WORK_ORDER_TYPE
+    dimensions:
+      - name: WO_TYPE_CODE
+        description: 'Work Order Type Code, which categorizes work orders into one of three types: Unplanned Emergency (UE), Planned Maintenance (PM), or Planned Project (PP).'
+        expr: WO_TYPE_CODE
+        data_type: VARCHAR(10)
+        sample_values:
+          - UE
+          - PM
+          - PP
+      - name: WO_TYPE_NAME
+        description: The type of work order, indicating whether it was unplanned and emergency in nature, or planned as part of a preventive or predictive maintenance schedule.
+        expr: WO_TYPE_NAME
+        data_type: VARCHAR(50)
+        sample_values:
+          - Unplanned Emergency
+          - Planned Preventive
+          - Planned Predictive
+    facts:
+      - name: WO_TYPE_ID
+        description: Unique identifier for the type of work order, such as maintenance, repair, or installation.
+        expr: WO_TYPE_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+    primary_key:
+      columns:
+        - WO_TYPE_ID
+  - name: FCT_ASSET_TELEMETRY
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: FCT_ASSET_TELEMETRY
+    dimensions:
+      - name: ASSET_ID
+        description: Unique identifier for an asset, used to track and monitor its telemetry data.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: DATE_SK
+        description: Date key representing the date of the telemetry data, in the format YYYYMMDD.
+        expr: DATE_SK
+        data_type: NUMBER(8,0)
+        sample_values:
+          - '20250922'
+          - '20250923'
+      - name: IS_ANOMALOUS
+        description: Indicates whether the asset's telemetry data is outside of its normal operating range, suggesting a potential issue or anomaly.
+        expr: IS_ANOMALOUS
+        data_type: BOOLEAN
+        sample_values:
+          - 'FALSE'
+          - 'TRUE'
+      - name: TELEMETRY_ID
+        description: Unique identifier for a specific telemetry data point.
+        expr: TELEMETRY_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+    time_dimensions:
+      - name: RECORDED_AT
+        description: The date and time when the asset telemetry data was recorded.
+        expr: RECORDED_AT
+        data_type: TIMESTAMP_NTZ(9)
+        sample_values:
+          - 2025-09-22T10:00:00.000+0000
+          - 2025-09-22T11:00:00.000+0000
+          - 2025-09-23T08:00:00.000+0000
+    facts:
+      - name: FAILURE_PROBABILITY
+        description: The probability of an asset failing, expressed as a decimal value between 0 and 1, where 0 represents no chance of failure and 1 represents certainty of failure.
+        expr: FAILURE_PROBABILITY
+        data_type: NUMBER(3,2)
+        sample_values:
+          - '0.03'
+          - '0.85'
+          - '0.02'
+      - name: HEALTH_SCORE
+        description: The HEALTH_SCORE column represents a calculated metric that indicates the overall health or performance of an asset, with higher values indicating better health and lower values indicating potential issues or degradation, allowing for proactive maintenance and optimization.
+        expr: HEALTH_SCORE
+        data_type: NUMBER(5,2)
+        sample_values:
+          - '98.50'
+          - '98.20'
+          - '35.10'
+      - name: PRESSURE_PSI
+        description: The pressure of the asset, measured in pounds per square inch (PSI).
+        expr: PRESSURE_PSI
+        data_type: NUMBER(6,2)
+        sample_values:
+          - '146.20'
+          - '145.00'
+          - '155.80'
+      - name: RUL_DAYS
+        description: The number of days remaining until the asset is expected to reach the end of its useful life.
+        expr: RUL_DAYS
+        data_type: NUMBER(5,0)
+        sample_values:
+          - '365'
+          - '364'
+          - '400'
+      - name: TEMPERATURE_C
+        description: The temperature reading of an asset in degrees Celsius.
+        expr: TEMPERATURE_C
+        data_type: NUMBER(5,2)
+        sample_values:
+          - '65.20'
+          - '66.10'
+          - '75.80'
+      - name: VIBRATION_MM_S
+        description: Vibration measurement in millimeters per second, indicating the level of vibration experienced by the asset.
+        expr: VIBRATION_MM_S
+        data_type: NUMBER(5,2)
+        sample_values:
+          - '0.51'
+          - '0.55'
+          - '2.15'
+    primary_key:
+      columns:
+        - TELEMETRY_ID
+  - name: FCT_MAINTENANCE_LOG
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: FCT_MAINTENANCE_LOG
+    dimensions:
+      - name: ACTION_DATE_SK
+        description: Date on which the maintenance activity was performed, in the format YYYYMMDD.
+        expr: ACTION_DATE_SK
+        data_type: NUMBER(8,0)
+        sample_values:
+          - '20250923'
+      - name: ASSET_ID
+        description: Unique identifier for the asset that the maintenance activity was performed on.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+      - name: FAILURE_FLAG
+        description: TRUE if this action was in response to a failure
+        expr: FAILURE_FLAG
+        data_type: BOOLEAN
+        sample_values:
+          - 'TRUE'
+      - name: LOG_ID
+        description: Unique identifier for each maintenance log entry.
+        expr: LOG_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+      - name: TECHNICIAN_NOTES
+        description: Free-form text notes recorded by the technician during maintenance activities, detailing the issues encountered, actions taken, and any other relevant information.
+        expr: TECHNICIAN_NOTES
+        data_type: VARCHAR(1000)
+        sample_values:
+          - High vibration detected. Found bearing misalignment. Emergency repair completed.
+      - name: WO_TYPE_ID
+        description: Type of work order (e.g. Preventative, Corrective, Predictive, etc.)
+        expr: WO_TYPE_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+    time_dimensions:
+      - name: COMPLETED_DATE
+        description: Date when the maintenance activity was completed.
+        expr: COMPLETED_DATE
+        data_type: DATE
+        sample_values:
+          - '2025-09-23'
+    facts:
+      - name: DOWNTIME_HOURS
+        description: The total number of hours a machine or system was unavailable due to maintenance or repair.
+        expr: DOWNTIME_HOURS
+        data_type: NUMBER(5,1)
+        sample_values:
+          - '4.0'
+      - name: LABOR_COST
+        description: The cost of labor incurred during a maintenance activity, representing the total amount paid to personnel for their work.
+        expr: LABOR_COST
+        data_type: NUMBER(10,2)
+        sample_values:
+          - '600.00'
+      - name: PARTS_COST
+        description: The total cost of parts used to perform the maintenance activity.
+        expr: PARTS_COST
+        data_type: NUMBER(10,2)
+        sample_values:
+          - '250.00'
+    primary_key:
+      columns:
+        - LOG_ID
+  - name: FCT_PRODUCTION_LOG
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: FCT_PRODUCTION_LOG
+    dimensions:
+      - name: ASSET_ID
+        description: Unique identifier for the asset being produced.
+        expr: ASSET_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: DATE_SK
+        description: Date key representing the date of production in the format YYYYMMDD.
+        expr: DATE_SK
+        data_type: NUMBER(8,0)
+        sample_values:
+          - '20250922'
+          - '20250923'
+      - name: PROD_LOG_ID
+        description: Unique identifier for each production log entry.
+        expr: PROD_LOG_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+    time_dimensions:
+      - name: PRODUCTION_DATE
+        description: Date on which the production activity took place.
+        expr: PRODUCTION_DATE
+        data_type: DATE
+        sample_values:
+          - '2025-09-22'
+          - '2025-09-23'
+    facts:
+      - name: ACTUAL_RUNTIME_HOURS
+        description: The actual number of hours spent on production, representing the real-world time taken to complete a task or process.
+        expr: ACTUAL_RUNTIME_HOURS
+        data_type: NUMBER(4,1)
+        sample_values:
+          - '20.0'
+          - '23.5'
+          - '24.0'
+      - name: PLANNED_RUNTIME_HOURS
+        description: The planned number of hours allocated for production to run.
+        expr: PLANNED_RUNTIME_HOURS
+        data_type: NUMBER(4,1)
+        sample_values:
+          - '24.0'
+      - name: UNITS_PRODUCED
+        description: The total quantity of units manufactured or produced during a specific production run or period.
+        expr: UNITS_PRODUCED
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '2400'
+          - '1250'
+          - '980'
+      - name: UNITS_SCRAPPED
+        description: The total number of units that were produced but did not meet quality standards and were therefore scrapped.
+        expr: UNITS_SCRAPPED
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '5'
+          - '15'
+          - '35'
+    primary_key:
+      columns:
+        - PROD_LOG_ID
+relationships:
+  - left_table: DIM_ASSET
+    relationship_columns:
+      - left_column: LINE_ID
+        right_column: LINE_ID
+    right_table: DIM_LINE
+    name: DIM_ASSET__TO__DIM_LINE
+  - name: DIM_ASSET__TO__DIM_ASSET_CLASS
+    left_table: DIM_ASSET
+    relationship_columns:
+      - left_column: ASSET_CLASS_ID
+        right_column: ASSET_CLASS_ID
+    right_table: DIM_ASSET_CLASS
+  - left_table: DIM_SENSOR
+    relationship_columns:
+      - left_column: ASSET_ID
+        right_column: ASSET_ID
+    right_table: DIM_ASSET
+    name: DIM_SENSOR__TO__DIM_ASSET
+  - name: DIM_LINE__TO__DIM_PLANT
+    left_table: DIM_LINE
+    relationship_columns:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    right_table: DIM_PLANT
+  - name: FCT_ASSET_TELEMETRY__TO__DIM_ASSET
+    left_table: FCT_ASSET_TELEMETRY
+    relationship_columns:
+      - left_column: ASSET_ID
+        right_column: ASSET_ID
+    right_table: DIM_ASSET
+  - name: FCT_ASSET_TELEMETRY__TO__DIM_DATE
+    left_table: FCT_ASSET_TELEMETRY
+    relationship_columns:
+      - left_column: DATE_SK
+        right_column: DATE_SK
+    right_table: DIM_DATE
+  - name: FCT_MAINTENANCE_LOG__TO__DIM_ASSET
+    left_table: FCT_MAINTENANCE_LOG
+    relationship_columns:
+      - left_column: ASSET_ID
+        right_column: ASSET_ID
+    right_table: DIM_ASSET
+  - name: FCT_MAINTENANCE_LOG__TO__DIM_WORK_ORDER_TYPE
+    left_table: FCT_MAINTENANCE_LOG
+    relationship_columns:
+      - left_column: WO_TYPE_ID
+        right_column: WO_TYPE_ID
+    right_table: DIM_WORK_ORDER_TYPE
+  - name: FCT_MAINTENANCE_LOG__TO__DIM_DATE
+    left_table: FCT_MAINTENANCE_LOG
+    relationship_columns:
+      - left_column: ACTION_DATE_SK
+        right_column: DATE_SK
+    right_table: DIM_DATE
+  - name: FCT_PRODUCTION_LOG__TO__DIM_ASSET
+    left_table: FCT_PRODUCTION_LOG
+    relationship_columns:
+      - left_column: ASSET_ID
+        right_column: ASSET_ID
+    right_table: DIM_ASSET
+  - name: FCT_PRODUCTION_LOG__TO__DIM_DATE
+    left_table: FCT_PRODUCTION_LOG
+    relationship_columns:
+      - left_column: DATE_SK
+        right_column: DATE_SK
+    right_table: DIM_DATE

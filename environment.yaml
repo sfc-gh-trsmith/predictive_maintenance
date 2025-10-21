@@ -1,0 +1,8 @@
+dependencies:
+  - snowflake-ml-python
+  - snowflake-connector-python
+  - pandas
+  - requests
+  - PyJWT
+  - cryptography
+  - streamlit

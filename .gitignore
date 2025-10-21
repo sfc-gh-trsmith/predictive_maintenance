@@ -1,0 +1,34 @@
+# Python virtual environment
+.venv/
+env/
+venv/
+
+# Streamlit specific files
+.streamlit/secrets.toml
+.streamlit/config.toml # Consider if you want to share config or keep it local
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data files and temporary outputs (adjust based on your project)
+*.csv
+*.xlsx
+*.parquet
+*.json
+*.pkl
+*.ipynb_checkpoints/
+data/ # If you have large local data files not meant for Git
+
+# Logs
+*.log
+
+# IDE specific files (e.g., VS Code)
+.vscode/
+
+# Environments
+.env
+.envrc
+.venv
+env/
+venv/
