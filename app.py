@@ -3,23 +3,23 @@ from streamlit_option_menu import option_menu
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
-    page_title="HyperForge PdM Dashboard",
+    page_title="SnowCore Industries Predictive Maintenance Dashboard",
     page_icon="🏭",
     layout="wide"
 )
 
-from views import executive_summary, oee_drilldown, financial_risk
+from views import executive_summary, oee_drilldown, financial_risk, asset_detail, line_visualization
 from utils.cortex_analyst import build_analyst_widget # <-- 1. IMPORT THE WIDGET
 from utils.unified_assistant import build_unified_widget
 
 
-st.title("🏭 HyperForge Predictive Maintenance Dashboard")
+st.title("🏭 SnowCore Industries Predictive Maintenance Dashboard")
 
 # --- TOP NAVIGATION MENU ---
 selected_page = option_menu(
     menu_title=None,
-    options=["Executive Summary", "OEE Drill-Down", "Financial Risk Drill-Down"],
-    icons=["building", "graph-down", "cash-coin"],
+    options=["Executive Summary", "OEE Drill-Down", "Financial Risk Drill-Down", "Asset Detail", "Line Visualization"],
+    icons=["building", "graph-down", "cash-coin", "search", "diagram-3"],
     menu_icon="cast",
     default_index=0,
     orientation="horizontal",
@@ -37,6 +37,10 @@ with main_content:
         oee_drilldown.show_page()
     elif selected_page == "Financial Risk Drill-Down":
         financial_risk.show_page()
+    elif selected_page == "Asset Detail":
+        asset_detail.show_page()
+    elif selected_page == "Line Visualization":
+        line_visualization.show_page()
 
 # 4. Place the analyst widget in the right-hand column
 with analyst_widget_col:

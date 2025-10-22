@@ -92,3 +92,28 @@ graph TD
     end
 
     ```
+
+## Authentication for Snowflake REST (Cortex Analyst and Intelligence Agent)
+
+This app uses Snowflake Programmatic Access Tokens (PAT) exclusively for HTTP calls to Snowflake REST endpoints. Tokens are resolved with the following precedence (first non-empty wins):
+
+1. `SNOWFLAKE_TOKEN`
+2. `SNOWFLAKE_CONNECTIONS_<CONNECTION_NAME>_TOKEN` (if `features.connection_name` is provided in `secrets.toml`)
+3. `SNOWFLAKE_TOKEN_FILE_PATH` (contents of the file)
+4. `st.secrets["snowflake"]["personal_access_token"]`
+5. `st.secrets["snowflake"]["token_file_path"]` (contents of the file)
+
+Headers sent to Snowflake:
+
+```python
+{
+  "Authorization": "Bearer <token>",
+  "Content-Type": "application/json",
+  "Accept": "application/json" | "text/event-stream",
+  "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"
+}
+```
+
+The base URL is derived from account: `https://<account-with-dashes>.snowflakecomputing.com`.
+
+Reference: Snowflake credential environment variables and PAT guidance in the docs: `https://docs.snowflake.com/en/developer-guide/snowflake-cli/connecting/configure-connections#use-environment-variables-for-snowflake-credentials`.
