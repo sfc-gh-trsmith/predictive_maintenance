@@ -131,7 +131,8 @@ CREATE OR REPLACE TABLE DIM_DATE (
 CREATE OR REPLACE TABLE DIM_PLANT (
     PLANT_ID        NUMBER(10,0) PRIMARY KEY,
     PLANT_NAME      VARCHAR(100),
-    LOCATION        VARCHAR(100)
+    LOCATION        VARCHAR(100),
+    PLANT_UNS_NK    VARCHAR(100) -- UNS Natural Key (enterprise/site)
 );
 
 -- Production Line Dimension (Location Hierarchy Level 2)
@@ -140,7 +141,21 @@ CREATE OR REPLACE TABLE DIM_LINE (
     PLANT_ID        NUMBER(10,0),
     LINE_NAME       VARCHAR(100),
     HOURLY_REVENUE  NUMBER(10,2), -- Used for calculating revenue loss
+    LINE_UNS_NK     VARCHAR(150), -- UNS Natural Key (enterprise/site/line)
     FOREIGN KEY (PLANT_ID) REFERENCES DIM_PLANT(PLANT_ID)
+);
+
+-- Process Dimension (Manufacturing Process Level)
+CREATE OR REPLACE TABLE DIM_PROCESS (
+    PROCESS_ID       INTEGER AUTOINCREMENT START 1 INCREMENT 1 PRIMARY KEY,
+    PROCESS_NK       VARCHAR(50) NOT NULL, -- Natural Key (Process Code)
+    PROCESS_NAME     VARCHAR(100),
+    PROCESS_TYPE     VARCHAR(50), -- e.g., 'Manufacturing', 'Assembly', 'Testing'
+    LINE_ID          NUMBER(10,0),
+    PROCESS_UNS_NK   VARCHAR(200), -- UNS Natural Key (enterprise/site/line/process)
+    DESCRIPTION      VARCHAR(255),
+    IS_ACTIVE        BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (LINE_ID) REFERENCES DIM_LINE(LINE_ID)
 );
 
 -- Asset Class Dimension (Asset Categorization)
@@ -156,15 +171,17 @@ CREATE OR REPLACE TABLE DIM_ASSET (
     ASSET_NAME              VARCHAR(100),
     MODEL                   VARCHAR(50),
     OEM_NAME                VARCHAR(50),
-    LINE_ID                 NUMBER(10,0),
+    PROCESS_ID              INTEGER, -- Foreign Key to DIM_PROCESS
+    PROCESS_SEQUENCE        INTEGER, -- Sequence within the process (1, 2, 3, etc.)
     ASSET_CLASS_ID          NUMBER(10,0),
     INSTALLATION_DATE       DATE,
     DOWNTIME_IMPACT_PER_HOUR NUMBER(12,2), -- Used for "Production at Risk" KPI
+    ASSET_UNS_NK            VARCHAR(250), -- UNS Natural Key (enterprise/site/line/process/asset)
     -- For Slowly Changing Dimensions (Type 2)
     SCD_START_DATE          TIMESTAMP_NTZ NOT NULL,
     SCD_END_DATE            TIMESTAMP_NTZ,
     IS_CURRENT              BOOLEAN,
-    FOREIGN KEY (LINE_ID) REFERENCES DIM_LINE(LINE_ID),
+    FOREIGN KEY (PROCESS_ID) REFERENCES DIM_PROCESS(PROCESS_ID),
     FOREIGN KEY (ASSET_CLASS_ID) REFERENCES DIM_ASSET_CLASS(ASSET_CLASS_ID)
 );
 
@@ -182,6 +199,7 @@ CREATE OR REPLACE TABLE DIM_SENSOR (
     ASSET_ID        INTEGER, -- Foreign Key to DIM_ASSET
     SENSOR_TYPE     VARCHAR(50),
     UNITS_OF_MEASURE VARCHAR(20),
+    SENSOR_UNS_NK   VARCHAR(300), -- UNS Natural Key (enterprise/site/line/process/asset/sensor_type)
     FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID)
 );
 
@@ -191,6 +209,7 @@ CREATE OR REPLACE TABLE DIM_SENSOR (
 CREATE OR REPLACE TABLE FCT_ASSET_TELEMETRY (
     TELEMETRY_ID        NUMBER(38,0) AUTOINCREMENT PRIMARY KEY,
     ASSET_ID            INTEGER NOT NULL,
+    PROCESS_ID          INTEGER, -- Foreign Key to DIM_PROCESS
     DATE_SK             NUMBER(8) NOT NULL,
     RECORDED_AT         TIMESTAMP_NTZ,
     TEMPERATURE_C       NUMBER(5,2),
@@ -200,42 +219,12 @@ CREATE OR REPLACE TABLE FCT_ASSET_TELEMETRY (
     FAILURE_PROBABILITY NUMBER(3,2), -- e.g., 0-1.0
     RUL_DAYS            NUMBER(5,0), -- Remaining Useful Life in days
     IS_ANOMALOUS        BOOLEAN DEFAULT FALSE,
-    FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID)
+    FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID),
+    FOREIGN KEY (PROCESS_ID) REFERENCES DIM_PROCESS(PROCESS_ID)
 ) COMMENT = 'Consolidated telemetry with ML predictions and health scores'
 CLUSTER BY (ASSET_ID, RECORDED_AT); -- Optimized for time-series queries on specific assets
 
--- Log of all maintenance activities (Enhanced)
-CREATE OR REPLACE TABLE FCT_MAINTENANCE_LOG (
-    LOG_ID              NUMBER(38,0) AUTOINCREMENT PRIMARY KEY,
-    ASSET_ID            INTEGER NOT NULL,
-    WO_TYPE_ID          NUMBER(10,0) NOT NULL,
-    ACTION_DATE_SK      NUMBER(8) NOT NULL,
-    COMPLETED_DATE      DATE,
-    DOWNTIME_HOURS      NUMBER(5,1),
-    PARTS_COST          NUMBER(10,2),
-    LABOR_COST          NUMBER(10,2),
-    FAILURE_FLAG        BOOLEAN COMMENT 'TRUE if this action was in response to a failure',
-    TECHNICIAN_ID       NUMBER(38,0) COMMENT 'Foreign key to DIM_TECHNICIAN',
-    FAILURE_CODE_ID     NUMBER(38,0) COMMENT 'Foreign key to DIM_FAILURE_CODE, populated when FAILURE_FLAG is TRUE',
-    TECHNICIAN_NOTES    VARCHAR(1000),
-    FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID),
-    FOREIGN KEY (WO_TYPE_ID) REFERENCES DIM_WORK_ORDER_TYPE(WO_TYPE_ID),
-    FOREIGN KEY (TECHNICIAN_ID) REFERENCES DIM_TECHNICIAN(TECHNICIAN_ID),
-    FOREIGN KEY (FAILURE_CODE_ID) REFERENCES DIM_FAILURE_CODE(FAILURE_CODE_ID)
-) CLUSTER BY (ASSET_ID, ACTION_DATE_SK);
 
--- Daily production summary for OEE calculations (New)
-CREATE OR REPLACE TABLE FCT_PRODUCTION_LOG (
-    PROD_LOG_ID         NUMBER(38,0) AUTOINCREMENT PRIMARY KEY,
-    ASSET_ID            INTEGER NOT NULL,
-    DATE_SK             NUMBER(8) NOT NULL,
-    PRODUCTION_DATE     DATE,
-    PLANNED_RUNTIME_HOURS   NUMBER(4,1),
-    ACTUAL_RUNTIME_HOURS    NUMBER(4,1), -- Drives OEE "Availability"
-    UNITS_PRODUCED      NUMBER(10,0), -- Drives OEE "Performance"
-    UNITS_SCRAPPED      NUMBER(10,0), -- Drives OEE "Quality"
-    FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID)
-) CLUSTER BY (ASSET_ID, PRODUCTION_DATE);
 
 CREATE OR REPLACE TABLE DIM_TECHNICIAN (
     TECHNICIAN_ID   NUMBER(38,0) AUTOINCREMENT  PRIMARY KEY,
@@ -247,6 +236,7 @@ CREATE OR REPLACE TABLE DIM_TECHNICIAN (
     IS_ACTIVE       BOOLEAN
 );
 
+
 CREATE OR REPLACE TABLE DIM_FAILURE_CODE (
     FAILURE_CODE_ID     NUMBER(38,0) AUTOINCREMENT PRIMARY KEY,
     FAILURE_HIERARCHY_1 VARCHAR(50), -- e.g., 'Mechanical', 'Electrical', 'Operational'
@@ -255,6 +245,7 @@ CREATE OR REPLACE TABLE DIM_FAILURE_CODE (
     FAILURE_DESCRIPTION VARCHAR(255)
 );
 
+
 CREATE OR REPLACE TABLE DIM_MATERIAL (
     MATERIAL_ID         INTEGER PRIMARY KEY,
     MATERIAL_NK         VARCHAR(50) NOT NULL, -- Part Number / SKU
@@ -262,6 +253,45 @@ CREATE OR REPLACE TABLE DIM_MATERIAL (
     SUPPLIER_NAME       VARCHAR(100),
     UNIT_COST           NUMBER(10,2)
 );
+
+
+-- Log of all maintenance activities (Enhanced)
+CREATE OR REPLACE TABLE FCT_MAINTENANCE_LOG (
+    LOG_ID              NUMBER(38,0) AUTOINCREMENT PRIMARY KEY,
+    ASSET_ID            INTEGER NOT NULL,
+    PROCESS_ID          INTEGER, -- Foreign Key to DIM_PROCESS
+    WO_TYPE_ID          NUMBER(10,0) NOT NULL,
+    ACTION_DATE_SK      NUMBER(8) NOT NULL,
+    COMPLETED_DATE      DATE,
+    DOWNTIME_HOURS      NUMBER(5,1),
+    PARTS_COST          NUMBER(10,2),
+    LABOR_COST          NUMBER(10,2),
+    FAILURE_FLAG        BOOLEAN COMMENT 'TRUE if this action was in response to a failure',
+    TECHNICIAN_ID       NUMBER(38,0) COMMENT 'Foreign key to DIM_TECHNICIAN',
+    FAILURE_CODE_ID     NUMBER(38,0) COMMENT 'Foreign key to DIM_FAILURE_CODE, populated when FAILURE_FLAG is TRUE',
+    TECHNICIAN_NOTES    VARCHAR(1000),
+    FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID),
+    FOREIGN KEY (PROCESS_ID) REFERENCES DIM_PROCESS(PROCESS_ID),
+    FOREIGN KEY (WO_TYPE_ID) REFERENCES DIM_WORK_ORDER_TYPE(WO_TYPE_ID),
+    FOREIGN KEY (TECHNICIAN_ID) REFERENCES DIM_TECHNICIAN(TECHNICIAN_ID),
+    FOREIGN KEY (FAILURE_CODE_ID) REFERENCES DIM_FAILURE_CODE(FAILURE_CODE_ID)
+) CLUSTER BY (ASSET_ID, ACTION_DATE_SK);
+
+-- Daily production summary for OEE calculations (New)
+CREATE OR REPLACE TABLE FCT_PRODUCTION_LOG (
+    PROD_LOG_ID         NUMBER(38,0) AUTOINCREMENT PRIMARY KEY,
+    ASSET_ID            INTEGER NOT NULL,
+    PROCESS_ID          INTEGER, -- Foreign Key to DIM_PROCESS
+    DATE_SK             NUMBER(8) NOT NULL,
+    PRODUCTION_DATE     DATE,
+    PLANNED_RUNTIME_HOURS   NUMBER(4,1),
+    ACTUAL_RUNTIME_HOURS    NUMBER(4,1), -- Drives OEE "Availability"
+    UNITS_PRODUCED      NUMBER(10,0), -- Drives OEE "Performance"
+    UNITS_SCRAPPED      NUMBER(10,0), -- Drives OEE "Quality"
+    FOREIGN KEY (ASSET_ID) REFERENCES DIM_ASSET(ASSET_ID),
+    FOREIGN KEY (PROCESS_ID) REFERENCES DIM_PROCESS(PROCESS_ID)
+) CLUSTER BY (ASSET_ID, PRODUCTION_DATE);
+
 
 CREATE OR REPLACE TABLE FCT_MAINTENANCE_PARTS_USED (
     LOG_ID              NUMBER(38,0) NOT NULL, -- Foreign Key to FCT_MAINTENANCE_LOG
@@ -322,22 +352,22 @@ CREATE OR REPLACE TABLE ML_FEATURE_STORE (
 USE SCHEMA HYPERFORGE.BRONZE;
 INSERT INTO RAW_EQUIPMENT_MASTER (EQUIPMENT_DATA)
 SELECT PARSE_JSON(column1) FROM VALUES
-('{ "serialNumber": "EQ-PUMP-001", "model": "HydroFlow 5000", "oem": "FlowServe", "installDate": "2022-01-15", "assetType": "Centrifugal Pump", "plant": "Davidson NC"}'),
-('{ "serialNumber": "EQ-MOTOR-007", "model": "IronHorse 75HP", "oem": "Siemens", "installDate": "2021-11-20", "assetType": "Induction Motor", "plant": "Davidson NC"}');
+('{ "serialNumber": "eq_pump_001", "model": "HydroFlow 5000", "oem": "FlowServe", "installDate": "2022-01-15", "assetType": "Centrifugal Pump", "plant": "Davidson NC"}'),
+('{ "serialNumber": "eq_motor_007", "model": "IronHorse 75HP", "oem": "Siemens", "installDate": "2021-11-20", "assetType": "Induction Motor", "plant": "Davidson NC"}');
 
 INSERT INTO RAW_IOT_TELEMETRY (RAW_PAYLOAD, SOURCE_TIMESTAMP)
 SELECT PARSE_JSON(column1), column2::TIMESTAMP_NTZ FROM VALUES
 -- Normal readings for Pump 001
-('{ "deviceId": "EQ-PUMP-001-VIB", "metric": "vibration", "value": 0.51, "unit": "mm/s" }', '2025-09-22 10:00:00'),
-('{ "deviceId": "EQ-PUMP-001-TMP", "metric": "temperature", "value": 65.2, "unit": "C" }', '2025-09-22 10:00:00'),
-('{ "deviceId": "EQ-PUMP-001-VIB", "metric": "vibration", "value": 0.55, "unit": "mm/s" }', '2025-09-22 11:00:00'),
+('{ "deviceId": "eq_pump_001_vib", "metric": "vibration", "value": 0.51, "unit": "mm/s" }', '2025-09-22 10:00:00'),
+('{ "deviceId": "eq_pump_001_tmp", "metric": "temperature", "value": 65.2, "unit": "C" }', '2025-09-22 10:00:00'),
+('{ "deviceId": "eq_pump_001_vib", "metric": "vibration", "value": 0.55, "unit": "mm/s" }', '2025-09-22 11:00:00'),
 -- Anomalous reading
-('{ "deviceId": "EQ-PUMP-001-VIB", "metric": "vibration", "value": 2.15, "unit": "mm/s" }', '2025-09-23 08:00:00'),
-('{ "deviceId": "EQ-PUMP-001-TMP", "metric": "temperature", "value": 75.8, "unit": "C" }', '2025-09-23 08:00:00');
+('{ "deviceId": "eq_pump_001_vib", "metric": "vibration", "value": 2.15, "unit": "mm/s" }', '2025-09-23 08:00:00'),
+('{ "deviceId": "eq_pump_001_tmp", "metric": "temperature", "value": 75.8, "unit": "C" }', '2025-09-23 08:00:00');
 
 INSERT INTO RAW_MAINTENANCE_LOGS (LOG_DATA)
 SELECT PARSE_JSON(column1) FROM VALUES
-('{ "workOrderId": "WO-9987", "assetId": "EQ-PUMP-001", "type": "CM", "notes": "High vibration detected. Found bearing misalignment.", "downtimeHours": 4, "laborCost": 600, "partsCost": 250, "failure": true, "date": "2025-09-23"}');
+('{ "workOrderId": "WO-9987", "assetId": "eq_pump_001", "type": "CM", "notes": "High vibration detected. Found bearing misalignment.", "downtimeHours": 4, "laborCost": 600, "partsCost": 250, "failure": true, "date": "2025-09-23"}');
 
 
 -- Insert into SILVER Layer
@@ -350,7 +380,7 @@ SELECT
     TO_NUMBER(TO_CHAR(d.DATE, 'YYYYMMDD')) AS DATE_SK,
     d.DATE AS FULL_DATE,
     DAYNAME(d.DATE) AS DAY_OF_WEEK,
-    MONTHNAME(d.DATE) AS MONTH_NAME,
+    TO_CHAR(TO_DATE(d.DATE), 'MMMM') AS MONTH_NAME,
     QUARTER(d.DATE) AS QUARTER,
     YEAR(d.DATE) AS YEAR
 FROM (
@@ -359,17 +389,49 @@ FROM (
 ) d;
 
 -- Plant and Line Hierarchy
-INSERT INTO DIM_PLANT (PLANT_ID, PLANT_NAME, LOCATION) VALUES
-(1, 'Davidson Manufacturing', 'Davidson NC'),
-(2, 'Charlotte Assembly', 'Charlotte NC');
+INSERT INTO DIM_PLANT (PLANT_ID, PLANT_NAME, LOCATION, PLANT_UNS_NK) VALUES
+(1, 'Davidson Manufacturing', 'Davidson NC', 'hyperforge/davidson_nc'),
+(2, 'Charlotte Assembly', 'Charlotte NC', 'hyperforge/charlotte_nc');
 
-INSERT INTO DIM_LINE (LINE_ID, PLANT_ID, LINE_NAME, HOURLY_REVENUE) VALUES
-(101, 1, 'Production Line A', 15000.00),
-(102, 1, 'Production Line B', 12000.00),
-(103, 1, 'Production Line C', 14000.00),
-(201, 2, 'Assembly Line 1', 18000.00),
-(202, 2, 'Assembly Line 2', 16000.00),
-(203, 2, 'Assembly Line 3', 17500.00);
+INSERT INTO DIM_LINE (LINE_ID, PLANT_ID, LINE_NAME, HOURLY_REVENUE, LINE_UNS_NK) VALUES
+(101, 1, 'Production Line A', 15000.00, 'hyperforge/davidson_nc/production_line_a'),
+(102, 1, 'Production Line B', 12000.00, 'hyperforge/davidson_nc/production_line_b'),
+(103, 1, 'Production Line C', 14000.00, 'hyperforge/davidson_nc/production_line_c'),
+(201, 2, 'Assembly Line 1', 18000.00, 'hyperforge/charlotte_nc/assembly_line_1'),
+(202, 2, 'Assembly Line 2', 16000.00, 'hyperforge/charlotte_nc/assembly_line_2'),
+(203, 2, 'Assembly Line 3', 17500.00, 'hyperforge/charlotte_nc/assembly_line_3');
+
+-- Manufacturing Processes (3 per line = 18 total processes)
+INSERT INTO DIM_PROCESS (PROCESS_NK, PROCESS_NAME, PROCESS_TYPE, LINE_ID, PROCESS_UNS_NK, DESCRIPTION) VALUES
+-- Production Line A Processes (Davidson Manufacturing)
+('machining_process_a', 'Machining Operations', 'Manufacturing', 101, 'hyperforge/davidson_nc/production_line_a/machining_process', 'Primary machining operations including cutting, drilling, and shaping'),
+('assembly_process_a', 'Assembly Operations', 'Assembly', 101, 'hyperforge/davidson_nc/production_line_a/assembly_process', 'Component assembly and integration operations'),
+('testing_process_a', 'Quality Testing', 'Testing', 101, 'hyperforge/davidson_nc/production_line_a/testing_process', 'Quality control and testing operations'),
+
+-- Production Line B Processes (Davidson Manufacturing)
+('forming_process_b', 'Metal Forming', 'Manufacturing', 102, 'hyperforge/davidson_nc/production_line_b/forming_process', 'Metal forming and shaping operations'),
+('welding_process_b', 'Welding Operations', 'Manufacturing', 102, 'hyperforge/davidson_nc/production_line_b/welding_process', 'Welding and joining operations'),
+('finishing_process_b', 'Surface Finishing', 'Manufacturing', 102, 'hyperforge/davidson_nc/production_line_b/finishing_process', 'Surface treatment and finishing operations'),
+
+-- Production Line C Processes (Davidson Manufacturing)
+('molding_process_c', 'Plastic Molding', 'Manufacturing', 103, 'hyperforge/davidson_nc/production_line_c/molding_process', 'Plastic injection molding operations'),
+('inspection_process_c', 'Quality Inspection', 'Testing', 103, 'hyperforge/davidson_nc/production_line_c/inspection_process', 'Quality inspection and verification'),
+('packaging_process_c', 'Final Packaging', 'Assembly', 103, 'hyperforge/davidson_nc/production_line_c/packaging_process', 'Final packaging and preparation'),
+
+-- Assembly Line 1 Processes (Charlotte Assembly)
+('robot_assembly_1', 'Robotic Assembly', 'Assembly', 201, 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly', 'Automated robotic assembly operations'),
+('manual_assembly_1', 'Manual Assembly', 'Assembly', 201, 'hyperforge/charlotte_nc/assembly_line_1/manual_assembly', 'Manual assembly and hand operations'),
+('quality_check_1', 'Quality Verification', 'Testing', 201, 'hyperforge/charlotte_nc/assembly_line_1/quality_check', 'Quality verification and testing'),
+
+-- Assembly Line 2 Processes (Charlotte Assembly)
+('welding_station_2', 'Welding Station', 'Manufacturing', 202, 'hyperforge/charlotte_nc/assembly_line_2/welding_station', 'Dedicated welding station operations'),
+('heat_treatment_2', 'Heat Treatment', 'Manufacturing', 202, 'hyperforge/charlotte_nc/assembly_line_2/heat_treatment', 'Heat treatment and thermal processing'),
+('final_inspection_2', 'Final Inspection', 'Testing', 202, 'hyperforge/charlotte_nc/assembly_line_2/final_inspection', 'Final quality inspection and approval'),
+
+-- Assembly Line 3 Processes (Charlotte Assembly)
+('sorting_process_3', 'Product Sorting', 'Assembly', 203, 'hyperforge/charlotte_nc/assembly_line_3/sorting_process', 'Product sorting and classification'),
+('packaging_robot_3', 'Automated Packaging', 'Assembly', 203, 'hyperforge/charlotte_nc/assembly_line_3/packaging_robot', 'Automated packaging operations'),
+('quality_scan_3', 'Quality Scanning', 'Testing', 203, 'hyperforge/charlotte_nc/assembly_line_3/quality_scan', 'Automated quality scanning and verification');
 
 -- Asset Classifications
 INSERT INTO DIM_ASSET_CLASS (ASSET_CLASS_ID, CLASS_NAME) VALUES
@@ -386,36 +448,36 @@ INSERT INTO DIM_WORK_ORDER_TYPE (WO_TYPE_ID, WO_TYPE_NAME, WO_TYPE_CODE) VALUES
 (4, 'Inspection', 'INSP');
 
 -- Assets (formerly Equipment) - 3 per line across 6 lines = 18 total
-INSERT INTO DIM_ASSET (ASSET_NK, ASSET_NAME, MODEL, OEM_NAME, LINE_ID, ASSET_CLASS_ID, INSTALLATION_DATE, DOWNTIME_IMPACT_PER_HOUR, SCD_START_DATE, IS_CURRENT) VALUES
--- Line 101 Assets (Production Line A)
-('EQ-PUMP-001', 'Primary Coolant Pump', 'HydroFlow 5000', 'FlowServe', 101, 1, '2022-01-15', 7500.00, '2022-01-15', TRUE),
-('EQ-MOTOR-007', 'Conveyor Drive Motor', 'IronHorse 75HP', 'Siemens', 101, 1, '2021-11-20', 5000.00, '2021-11-20', TRUE),
-('EQ-COMP-101', 'Air Compressor Unit', 'CompMax 200', 'Atlas Copco', 101, 1, '2022-03-10', 6000.00, '2022-03-10', TRUE),
+INSERT INTO DIM_ASSET (ASSET_NK, ASSET_NAME, MODEL, OEM_NAME, PROCESS_ID, PROCESS_SEQUENCE, ASSET_CLASS_ID, INSTALLATION_DATE, DOWNTIME_IMPACT_PER_HOUR, ASSET_UNS_NK, SCD_START_DATE, IS_CURRENT) VALUES
+-- Line 101 Assets (Production Line A) - Machining Process
+('eq_pump_001', 'Primary Coolant Pump', 'HydroFlow 5000', 'FlowServe', 1, 1, 1, '2022-01-15', 7500.00, 'hyperforge/davidson_nc/production_line_a/machining_process/eq_pump_001', '2022-01-15', TRUE),
+('eq_motor_007', 'Conveyor Drive Motor', 'IronHorse 75HP', 'Siemens', 1, 2, 1, '2021-11-20', 5000.00, 'hyperforge/davidson_nc/production_line_a/machining_process/eq_motor_007', '2021-11-20', TRUE),
+('eq_comp_101', 'Air Compressor Unit', 'CompMax 200', 'Atlas Copco', 1, 3, 1, '2022-03-10', 6000.00, 'hyperforge/davidson_nc/production_line_a/machining_process/eq_comp_101', '2022-03-10', TRUE),
 
--- Line 102 Assets (Production Line B) 
-('EQ-PUMP-102', 'Hydraulic Pump System', 'PowerFlow 3000', 'Bosch Rexroth', 102, 1, '2021-08-15', 4500.00, '2021-08-15', TRUE),
-('EQ-MOTOR-102', 'Main Drive Motor', 'PowerMax 50HP', 'ABB', 102, 1, '2021-09-20', 4000.00, '2021-09-20', TRUE),
-('EQ-FAN-102', 'Cooling Fan Assembly', 'AeroMax 1200', 'Ziehl-Abegg', 102, 3, '2022-01-05', 2500.00, '2022-01-05', TRUE),
+-- Line 102 Assets (Production Line B) - Forming Process
+('eq_pump_102', 'Hydraulic Pump System', 'PowerFlow 3000', 'Bosch Rexroth', 4, 1, 1, '2021-08-15', 4500.00, 'hyperforge/davidson_nc/production_line_b/forming_process/eq_pump_102', '2021-08-15', TRUE),
+('eq_motor_102', 'Main Drive Motor', 'PowerMax 50HP', 'ABB', 4, 2, 1, '2021-09-20', 4000.00, 'hyperforge/davidson_nc/production_line_b/forming_process/eq_motor_102', '2021-09-20', TRUE),
+('eq_fan_102', 'Cooling Fan Assembly', 'AeroMax 1200', 'Ziehl-Abegg', 4, 3, 3, '2022-01-05', 2500.00, 'hyperforge/davidson_nc/production_line_b/forming_process/eq_fan_102', '2022-01-05', TRUE),
 
--- Line 103 Assets (Production Line C)
-('EQ-PUMP-103', 'Process Circulation Pump', 'FlowTech 4000', 'Grundfos', 103, 1, '2021-12-12', 5500.00, '2021-12-12', TRUE),
-('EQ-MOTOR-103', 'Conveyor Motor Assembly', 'DriveForce 60HP', 'Siemens', 103, 1, '2022-02-18', 4800.00, '2022-02-18', TRUE),
-('EQ-VALVE-103', 'Control Valve System', 'PrecisionFlow 500', 'Emerson', 103, 2, '2022-04-22', 3200.00, '2022-04-22', TRUE),
+-- Line 103 Assets (Production Line C) - Molding Process
+('eq_pump_103', 'Process Circulation Pump', 'FlowTech 4000', 'Grundfos', 7, 1, 1, '2021-12-12', 5500.00, 'hyperforge/davidson_nc/production_line_c/molding_process/eq_pump_103', '2021-12-12', TRUE),
+('eq_motor_103', 'Conveyor Motor Assembly', 'DriveForce 60HP', 'Siemens', 7, 2, 1, '2022-02-18', 4800.00, 'hyperforge/davidson_nc/production_line_c/molding_process/eq_motor_103', '2022-02-18', TRUE),
+('eq_valve_103', 'Control Valve System', 'PrecisionFlow 500', 'Emerson', 7, 3, 2, '2022-04-22', 3200.00, 'hyperforge/davidson_nc/production_line_c/molding_process/eq_valve_103', '2022-04-22', TRUE),
 
--- Line 201 Assets (Assembly Line 1)
-('EQ-ROBOT-201', 'Assembly Robot Arm', 'FlexArm 6000', 'KUKA', 201, 4, '2021-06-30', 9000.00, '2021-06-30', TRUE),
-('EQ-MOTOR-201', 'Conveyor Drive System', 'MegaDrive 100HP', 'Schneider Electric', 201, 1, '2021-07-15', 6500.00, '2021-07-15', TRUE),
-('EQ-PRESS-201', 'Pneumatic Press Unit', 'PowerPress 5000', 'SMC', 201, 2, '2021-08-01', 7200.00, '2021-08-01', TRUE),
+-- Line 201 Assets (Assembly Line 1) - Robot Assembly Process
+('eq_robot_201', 'Assembly Robot Arm', 'FlexArm 6000', 'KUKA', 10, 1, 4, '2021-06-30', 9000.00, 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_robot_201', '2021-06-30', TRUE),
+('eq_motor_201', 'Conveyor Drive System', 'MegaDrive 100HP', 'Schneider Electric', 10, 2, 1, '2021-07-15', 6500.00, 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_motor_201', '2021-07-15', TRUE),
+('eq_press_201', 'Pneumatic Press Unit', 'PowerPress 5000', 'SMC', 10, 3, 2, '2021-08-01', 7200.00, 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_press_201', '2021-08-01', TRUE),
 
--- Line 202 Assets (Assembly Line 2)
-('EQ-ROBOT-202', 'Welding Robot System', 'WeldMaster Pro', 'Fanuc', 202, 4, '2021-09-10', 8500.00, '2021-09-10', TRUE),
-('EQ-MOTOR-202', 'Material Handling Motor', 'FlexDrive 80HP', 'Rockwell', 202, 1, '2021-10-05', 5800.00, '2021-10-05', TRUE),
-('EQ-HEAT-202', 'Heat Treatment Furnace', 'ThermoPro 3000', 'Despatch', 202, 2, '2021-11-12', 8000.00, '2021-11-12', TRUE),
+-- Line 202 Assets (Assembly Line 2) - Welding Station Process
+('eq_robot_202', 'Welding Robot System', 'WeldMaster Pro', 'Fanuc', 13, 1, 4, '2021-09-10', 8500.00, 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_robot_202', '2021-09-10', TRUE),
+('eq_motor_202', 'Material Handling Motor', 'FlexDrive 80HP', 'Rockwell', 13, 2, 1, '2021-10-05', 5800.00, 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_motor_202', '2021-10-05', TRUE),
+('eq_heat_202', 'Heat Treatment Furnace', 'ThermoPro 3000', 'Despatch', 14, 1, 2, '2021-11-12', 8000.00, 'hyperforge/charlotte_nc/assembly_line_2/heat_treatment/eq_heat_202', '2021-11-12', TRUE),
 
--- Line 203 Assets (Assembly Line 3)
-('EQ-ROBOT-203', 'Packaging Robot', 'PackBot 2000', 'ABB Robotics', 203, 4, '2022-01-20', 7800.00, '2022-01-20', TRUE),
-('EQ-MOTOR-203', 'Sorting System Motor', 'SortDrive 45HP', 'Baldor', 203, 1, '2022-02-14', 4200.00, '2022-02-14', TRUE),
-('EQ-SCAN-203', 'Quality Control Scanner', 'VisionScan Pro', 'Cognex', 203, 4, '2022-03-18', 6200.00, '2022-03-18', TRUE);
+-- Line 203 Assets (Assembly Line 3) - Sorting and Packaging Processes
+('eq_robot_203', 'Packaging Robot', 'PackBot 2000', 'ABB Robotics', 16, 1, 4, '2022-01-20', 7800.00, 'hyperforge/charlotte_nc/assembly_line_3/packaging_robot/eq_robot_203', '2022-01-20', TRUE),
+('eq_motor_203', 'Sorting System Motor', 'SortDrive 45HP', 'Baldor', 15, 1, 1, '2022-02-14', 4200.00, 'hyperforge/charlotte_nc/assembly_line_3/sorting_process/eq_motor_203', '2022-02-14', TRUE),
+('eq_scan_203', 'Quality Control Scanner', 'VisionScan Pro', 'Cognex', 18, 1, 4, '2022-03-18', 6200.00, 'hyperforge/charlotte_nc/assembly_line_3/quality_scan/eq_scan_203', '2022-03-18', TRUE);
 
 -- Populate Technicians
 INSERT INTO DIM_TECHNICIAN (EMPLOYEE_NK, TECHNICIAN_NAME, CRAFT, SHIFT, HIRE_DATE, IS_ACTIVE) VALUES
@@ -444,6 +506,29 @@ INSERT INTO DIM_FAILURE_CODE (FAILURE_HIERARCHY_1, FAILURE_HIERARCHY_2, FAILURE_
 ('Operational', 'Overload', 'Capacity', 'Equipment operated beyond design capacity'),
 ('Operational', 'Temperature', 'Overheating', 'Equipment overheating due to operational conditions'),
 ('Operational', 'Contamination', 'Foreign Object', 'Foreign object contamination causing operational issues');
+
+-- Populate Materials (Parts and components used in maintenance)
+INSERT INTO DIM_MATERIAL (MATERIAL_ID, MATERIAL_NK, MATERIAL_DESC, SUPPLIER_NAME, UNIT_COST) VALUES
+(1, 'BRG-001', 'Standard Ball Bearing 6202', 'SKF Industries', 25.50),
+(2, 'BRG-002', 'Heavy Duty Roller Bearing', 'Timken Company', 85.00),
+(3, 'SEAL-001', 'Oil Seal 35x52x7', 'Parker Hannifin', 12.75),
+(4, 'SEAL-002', 'Mechanical Seal Assembly', 'John Crane', 145.00),
+(5, 'BELT-001', 'V-Belt A47', 'Gates Corporation', 18.50),
+(6, 'FILTER-001', 'Hydraulic Filter Element', 'Pall Corporation', 42.00),
+(7, 'FILTER-002', 'Air Filter Cartridge', 'Donaldson Company', 38.50),
+(8, 'OIL-001', 'Synthetic Gear Oil 5L', 'Mobil', 55.00),
+(9, 'OIL-002', 'Hydraulic Oil ISO 46 20L', 'Shell', 95.00),
+(10, 'MOTOR-001', 'Servo Motor 2kW', 'Siemens', 850.00),
+(11, 'SENSOR-001', 'Temperature Sensor PT100', 'Omega Engineering', 75.00),
+(12, 'SENSOR-002', 'Vibration Sensor Accelerometer', 'PCB Piezotronics', 425.00),
+(13, 'VALVE-001', 'Solenoid Valve 24V', 'Emerson', 165.00),
+(14, 'COUPLING-001', 'Flexible Coupling', 'Lovejoy', 95.00),
+(15, 'GASKET-001', 'Flange Gasket Set', 'Garlock', 22.00),
+(16, 'IMPELLER-001', 'Pump Impeller Bronze', 'Goulds Pumps', 320.00),
+(17, 'WIRE-001', 'Electrical Wire 10AWG 100ft', '3M', 85.00),
+(18, 'RELAY-001', 'Control Relay 24VDC', 'Allen-Bradley', 45.00),
+(19, 'FUSE-001', 'Fast-Acting Fuse 30A', 'Bussmann', 8.50),
+(20, 'GREASE-001', 'High-Temp Bearing Grease 1lb', 'Mobil', 15.75);
 
 -- Populate Budget Data
 INSERT INTO FCT_BUDGET (BUDGET_ID, PLANT_ID, YEAR, QUARTER, BUDGET_TYPE, BUDGET_AMOUNT) VALUES
@@ -488,300 +573,682 @@ INSERT INTO FCT_BUDGET (BUDGET_ID, PLANT_ID, YEAR, QUARTER, BUDGET_TYPE, BUDGET_
 (32, 2, 2024, 4, 'CapEx Project', 200000.00);
 
 -- Sensors (3 per asset = 54 total sensors)
-INSERT INTO DIM_SENSOR (SENSOR_NK, ASSET_ID, SENSOR_TYPE, UNITS_OF_MEASURE) VALUES
+INSERT INTO DIM_SENSOR (SENSOR_NK, ASSET_ID, SENSOR_TYPE, UNITS_OF_MEASURE, SENSOR_UNS_NK) VALUES
 -- Asset 1 (Primary Coolant Pump) Sensors
-('EQ-PUMP-001-VIB', 1, 'Vibration', 'mm/s'),
-('EQ-PUMP-001-TMP', 1, 'Temperature', 'Celsius'),
-('EQ-PUMP-001-PSI', 1, 'Pressure', 'PSI'),
+('eq_pump_001_vib', 1, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_pump_001/vibration'),
+('eq_pump_001_tmp', 1, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_pump_001/temperature'),
+('eq_pump_001_psi', 1, 'Pressure', 'PSI', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_pump_001/pressure'),
 
 -- Asset 2 (Conveyor Drive Motor) Sensors
-('EQ-MOTOR-007-VIB', 2, 'Vibration', 'mm/s'),
-('EQ-MOTOR-007-TMP', 2, 'Temperature', 'Celsius'),
-('EQ-MOTOR-007-RPM', 2, 'Rotational Speed', 'RPM'),
+('eq_motor_007_vib', 2, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_motor_007/vibration'),
+('eq_motor_007_tmp', 2, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_motor_007/temperature'),
+('eq_motor_007_rpm', 2, 'Rotational Speed', 'RPM', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_motor_007/rotational_speed'),
 
 -- Asset 3 (Air Compressor Unit) Sensors
-('EQ-COMP-101-VIB', 3, 'Vibration', 'mm/s'),
-('EQ-COMP-101-TMP', 3, 'Temperature', 'Celsius'),
-('EQ-COMP-101-PSI', 3, 'Pressure', 'PSI'),
+('eq_comp_101_vib', 3, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_comp_101/vibration'),
+('eq_comp_101_tmp', 3, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_comp_101/temperature'),
+('eq_comp_101_psi', 3, 'Pressure', 'PSI', 'hyperforge/davidson_nc/production_line_a/machining_process/eq_comp_101/pressure'),
 
 -- Asset 4 (Hydraulic Pump System) Sensors
-('EQ-PUMP-102-VIB', 4, 'Vibration', 'mm/s'),
-('EQ-PUMP-102-TMP', 4, 'Temperature', 'Celsius'),
-('EQ-PUMP-102-PSI', 4, 'Pressure', 'PSI'),
+('eq_pump_102_vib', 4, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_pump_102/vibration'),
+('eq_pump_102_tmp', 4, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_pump_102/temperature'),
+('eq_pump_102_psi', 4, 'Pressure', 'PSI', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_pump_102/pressure'),
 
 -- Asset 5 (Main Drive Motor) Sensors
-('EQ-MOTOR-102-VIB', 5, 'Vibration', 'mm/s'),
-('EQ-MOTOR-102-TMP', 5, 'Temperature', 'Celsius'),
-('EQ-MOTOR-102-CUR', 5, 'Current', 'Amps'),
+('eq_motor_102_vib', 5, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_motor_102/vibration'),
+('eq_motor_102_tmp', 5, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_motor_102/temperature'),
+('eq_motor_102_cur', 5, 'Current', 'Amps', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_motor_102/current'),
 
 -- Asset 6 (Cooling Fan Assembly) Sensors
-('EQ-FAN-102-VIB', 6, 'Vibration', 'mm/s'),
-('EQ-FAN-102-TMP', 6, 'Temperature', 'Celsius'),
-('EQ-FAN-102-RPM', 6, 'Rotational Speed', 'RPM'),
+('eq_fan_102_vib', 6, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_fan_102/vibration'),
+('eq_fan_102_tmp', 6, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_fan_102/temperature'),
+('eq_fan_102_rpm', 6, 'Rotational Speed', 'RPM', 'hyperforge/davidson_nc/production_line_b/forming_process/eq_fan_102/rotational_speed'),
 
 -- Asset 7 (Process Circulation Pump) Sensors
-('EQ-PUMP-103-VIB', 7, 'Vibration', 'mm/s'),
-('EQ-PUMP-103-TMP', 7, 'Temperature', 'Celsius'),
-('EQ-PUMP-103-FLW', 7, 'Flow Rate', 'GPM'),
+('eq_pump_103_vib', 7, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_pump_103/vibration'),
+('eq_pump_103_tmp', 7, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_pump_103/temperature'),
+('eq_pump_103_flw', 7, 'Flow Rate', 'GPM', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_pump_103/flow_rate'),
 
 -- Asset 8 (Conveyor Motor Assembly) Sensors
-('EQ-MOTOR-103-VIB', 8, 'Vibration', 'mm/s'),
-('EQ-MOTOR-103-TMP', 8, 'Temperature', 'Celsius'),
-('EQ-MOTOR-103-TRQ', 8, 'Torque', 'Nm'),
+('eq_motor_103_vib', 8, 'Vibration', 'mm/s', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_motor_103/vibration'),
+('eq_motor_103_tmp', 8, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_motor_103/temperature'),
+('eq_motor_103_trq', 8, 'Torque', 'Nm', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_motor_103/torque'),
 
 -- Asset 9 (Control Valve System) Sensors
-('EQ-VALVE-103-PSI', 9, 'Pressure', 'PSI'),
-('EQ-VALVE-103-TMP', 9, 'Temperature', 'Celsius'),
-('EQ-VALVE-103-POS', 9, 'Position', 'Percent'),
+('eq_valve_103_psi', 9, 'Pressure', 'PSI', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_valve_103/pressure'),
+('eq_valve_103_tmp', 9, 'Temperature', 'Celsius', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_valve_103/temperature'),
+('eq_valve_103_pos', 9, 'Position', 'Percent', 'hyperforge/davidson_nc/production_line_c/molding_process/eq_valve_103/position'),
 
 -- Asset 10 (Assembly Robot Arm) Sensors
-('EQ-ROBOT-201-TMP', 10, 'Temperature', 'Celsius'),
-('EQ-ROBOT-201-CUR', 10, 'Current', 'Amps'),
-('EQ-ROBOT-201-POS', 10, 'Position', 'Degrees'),
+('eq_robot_201_tmp', 10, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_robot_201/temperature'),
+('eq_robot_201_cur', 10, 'Current', 'Amps', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_robot_201/current'),
+('eq_robot_201_pos', 10, 'Position', 'Degrees', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_robot_201/position'),
 
 -- Asset 11 (Conveyor Drive System) Sensors
-('EQ-MOTOR-201-VIB', 11, 'Vibration', 'mm/s'),
-('EQ-MOTOR-201-TMP', 11, 'Temperature', 'Celsius'),
-('EQ-MOTOR-201-CUR', 11, 'Current', 'Amps'),
+('eq_motor_201_vib', 11, 'Vibration', 'mm/s', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_motor_201/vibration'),
+('eq_motor_201_tmp', 11, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_motor_201/temperature'),
+('eq_motor_201_cur', 11, 'Current', 'Amps', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_motor_201/current'),
 
 -- Asset 12 (Pneumatic Press Unit) Sensors
-('EQ-PRESS-201-PSI', 12, 'Pressure', 'PSI'),
-('EQ-PRESS-201-TMP', 12, 'Temperature', 'Celsius'),
-('EQ-PRESS-201-FOR', 12, 'Force', 'kN'),
+('eq_press_201_psi', 12, 'Pressure', 'PSI', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_press_201/pressure'),
+('eq_press_201_tmp', 12, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_press_201/temperature'),
+('eq_press_201_for', 12, 'Force', 'kN', 'hyperforge/charlotte_nc/assembly_line_1/robot_assembly/eq_press_201/force'),
 
 -- Asset 13 (Welding Robot System) Sensors
-('EQ-ROBOT-202-TMP', 13, 'Temperature', 'Celsius'),
-('EQ-ROBOT-202-CUR', 13, 'Current', 'Amps'),
-('EQ-ROBOT-202-VOL', 13, 'Voltage', 'Volts'),
+('eq_robot_202_tmp', 13, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_robot_202/temperature'),
+('eq_robot_202_cur', 13, 'Current', 'Amps', 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_robot_202/current'),
+('eq_robot_202_vol', 13, 'Voltage', 'Volts', 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_robot_202/voltage'),
 
 -- Asset 14 (Material Handling Motor) Sensors
-('EQ-MOTOR-202-VIB', 14, 'Vibration', 'mm/s'),
-('EQ-MOTOR-202-TMP', 14, 'Temperature', 'Celsius'),
-('EQ-MOTOR-202-SPD', 14, 'Speed', 'RPM'),
+('eq_motor_202_vib', 14, 'Vibration', 'mm/s', 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_motor_202/vibration'),
+('eq_motor_202_tmp', 14, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_motor_202/temperature'),
+('eq_motor_202_spd', 14, 'Speed', 'RPM', 'hyperforge/charlotte_nc/assembly_line_2/welding_station/eq_motor_202/speed'),
 
 -- Asset 15 (Heat Treatment Furnace) Sensors
-('EQ-HEAT-202-TMP', 15, 'Temperature', 'Celsius'),
-('EQ-HEAT-202-GAS', 15, 'Gas Flow', 'SCFM'),
-('EQ-HEAT-202-OXY', 15, 'Oxygen Level', 'Percent'),
+('eq_heat_202_tmp', 15, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_2/heat_treatment/eq_heat_202/temperature'),
+('eq_heat_202_gas', 15, 'Gas Flow', 'SCFM', 'hyperforge/charlotte_nc/assembly_line_2/heat_treatment/eq_heat_202/gas_flow'),
+('eq_heat_202_oxy', 15, 'Oxygen Level', 'Percent', 'hyperforge/charlotte_nc/assembly_line_2/heat_treatment/eq_heat_202/oxygen_level'),
 
 -- Asset 16 (Packaging Robot) Sensors
-('EQ-ROBOT-203-TMP', 16, 'Temperature', 'Celsius'),
-('EQ-ROBOT-203-SPD', 16, 'Speed', 'Units/Min'),
-('EQ-ROBOT-203-POS', 16, 'Position', 'mm'),
+('eq_robot_203_tmp', 16, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_3/packaging_robot/eq_robot_203/temperature'),
+('eq_robot_203_spd', 16, 'Speed', 'Units/Min', 'hyperforge/charlotte_nc/assembly_line_3/packaging_robot/eq_robot_203/speed'),
+('eq_robot_203_pos', 16, 'Position', 'mm', 'hyperforge/charlotte_nc/assembly_line_3/packaging_robot/eq_robot_203/position'),
 
 -- Asset 17 (Sorting System Motor) Sensors
-('EQ-MOTOR-203-VIB', 17, 'Vibration', 'mm/s'),
-('EQ-MOTOR-203-TMP', 17, 'Temperature', 'Celsius'),
-('EQ-MOTOR-203-CUR', 17, 'Current', 'Amps'),
+('eq_motor_203_vib', 17, 'Vibration', 'mm/s', 'hyperforge/charlotte_nc/assembly_line_3/sorting_process/eq_motor_203/vibration'),
+('eq_motor_203_tmp', 17, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_3/sorting_process/eq_motor_203/temperature'),
+('eq_motor_203_cur', 17, 'Current', 'Amps', 'hyperforge/charlotte_nc/assembly_line_3/sorting_process/eq_motor_203/current'),
 
 -- Asset 18 (Quality Control Scanner) Sensors
-('EQ-SCAN-203-TMP', 18, 'Temperature', 'Celsius'),
-('EQ-SCAN-203-LUX', 18, 'Light Intensity', 'Lux'),
-('EQ-SCAN-203-FPS', 18, 'Scan Rate', 'FPS');
+('eq_scan_203_tmp', 18, 'Temperature', 'Celsius', 'hyperforge/charlotte_nc/assembly_line_3/quality_scan/eq_scan_203/temperature'),
+('eq_scan_203_lux', 18, 'Light Intensity', 'Lux', 'hyperforge/charlotte_nc/assembly_line_3/quality_scan/eq_scan_203/light_intensity'),
+('eq_scan_203_fps', 18, 'Scan Rate', 'FPS', 'hyperforge/charlotte_nc/assembly_line_3/quality_scan/eq_scan_203/scan_rate');
 
 -- Populate Facts using IDs from Dimensions
--- Asset Telemetry (24 hourly readings per asset on 9/22/2025)
--- Using a CTE to generate hourly data for all 18 assets
-INSERT INTO FCT_ASSET_TELEMETRY (ASSET_ID, DATE_SK, RECORDED_AT, TEMPERATURE_C, VIBRATION_MM_S, PRESSURE_PSI, HEALTH_SCORE, FAILURE_PROBABILITY, RUL_DAYS, IS_ANOMALOUS)
-WITH hourly_base AS (
+-- Asset Telemetry (Hourly readings for all 18 assets from Sept 1, 2025 to current date)
+-- Using a CTE to generate hourly data dynamically
+INSERT INTO FCT_ASSET_TELEMETRY (ASSET_ID, PROCESS_ID, DATE_SK, RECORDED_AT, TEMPERATURE_C, VIBRATION_MM_S, PRESSURE_PSI, HEALTH_SCORE, FAILURE_PROBABILITY, RUL_DAYS, IS_ANOMALOUS)
+WITH date_params AS (
     SELECT 
-        asset_id,
-        20250922 as date_sk,
-        DATEADD(HOUR, h.hour_offset, '2025-09-22 00:00:00'::TIMESTAMP_NTZ) as recorded_at,
-        h.hour_offset
-    FROM (SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS ASSET_ID FROM TABLE(GENERATOR(ROWCOUNT => 18))) a
-    CROSS JOIN (SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS HOUR_OFFSET FROM TABLE(GENERATOR(ROWCOUNT => 24))) h
+        '2025-09-01 00:00:00'::TIMESTAMP_NTZ AS start_timestamp,
+        DATE_TRUNC('HOUR', CURRENT_TIMESTAMP())::TIMESTAMP_NTZ AS end_timestamp
+),
+hourly_base AS (
+    SELECT 
+        a.asset_id,
+        a.process_id,
+        DATEADD(HOUR, h.hour_seq, dp.start_timestamp) as recorded_at,
+        TO_NUMBER(TO_CHAR(DATEADD(HOUR, h.hour_seq, dp.start_timestamp), 'YYYYMMDD')) as date_sk,
+        h.hour_seq,
+        HOUR(DATEADD(HOUR, h.hour_seq, dp.start_timestamp)) as hour_of_day,
+        DATEDIFF(DAY, dp.start_timestamp, DATEADD(HOUR, h.hour_seq, dp.start_timestamp)) as days_elapsed
+    FROM date_params dp
+    CROSS JOIN (
+        SELECT 
+            da.ASSET_ID,
+            da.PROCESS_ID
+        FROM HYPERFORGE.SILVER.DIM_ASSET da
+        WHERE da.IS_CURRENT = TRUE
+    ) a
+    CROSS JOIN (
+        SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS hour_seq
+        FROM TABLE(GENERATOR(ROWCOUNT => 10000))  -- Enough for ~13 months
+    ) h
+    WHERE DATEADD(HOUR, h.hour_seq, dp.start_timestamp) <= dp.end_timestamp
 )
 SELECT 
     asset_id,
+    process_id,
     date_sk,
     recorded_at,
     -- Generate realistic sensor data based on asset type and time (controlled ranges)
     CASE 
-        WHEN asset_id IN (1,4,7) THEN ROUND(60 + (hour_offset * 0.5) + UNIFORM(0, 10, RANDOM()), 2)  -- Pumps run warmer
-        WHEN asset_id IN (2,5,8,11,14,17) THEN ROUND(55 + (hour_offset * 0.3) + UNIFORM(0, 8, RANDOM()), 2)  -- Motors
-        WHEN asset_id IN (10,13,16) THEN ROUND(50 + (hour_offset * 0.2) + UNIFORM(0, 6, RANDOM()), 2)  -- Robots
-        WHEN asset_id = 15 THEN ROUND(200 + (hour_offset * 2) + UNIFORM(0, 20, RANDOM()), 2)  -- Furnace much hotter
-        ELSE ROUND(45 + (hour_offset * 0.4) + UNIFORM(0, 5, RANDOM()), 2)  -- Other equipment
+        WHEN asset_id IN (1,4,7) THEN ROUND(60 + (hour_of_day * 0.5) + (days_elapsed * 0.1) + UNIFORM(-3, 7, RANDOM()), 2)  -- Pumps run warmer, gradual degradation
+        WHEN asset_id IN (2,5,8,11,14,17) THEN ROUND(55 + (hour_of_day * 0.3) + (days_elapsed * 0.08) + UNIFORM(-2, 6, RANDOM()), 2)  -- Motors
+        WHEN asset_id IN (10,13,16) THEN ROUND(50 + (hour_of_day * 0.2) + (days_elapsed * 0.05) + UNIFORM(-2, 4, RANDOM()), 2)  -- Robots
+        WHEN asset_id = 15 THEN ROUND(200 + (hour_of_day * 2) + (days_elapsed * 0.5) + UNIFORM(-10, 10, RANDOM()), 2)  -- Furnace much hotter
+        ELSE ROUND(45 + (hour_of_day * 0.4) + (days_elapsed * 0.06) + UNIFORM(-2, 3, RANDOM()), 2)  -- Other equipment
     END as temperature_c,
     
-    -- Vibration data (rotating equipment has higher vibration) - controlled precision
+    -- Vibration data (rotating equipment has higher vibration) - controlled precision with degradation
     CASE 
-        WHEN asset_id IN (1,2,4,5,7,8,11,14,17) THEN ROUND(0.3 + UNIFORM(0, 0.4, RANDOM()), 2)  -- Rotating equipment
-        WHEN asset_id IN (10,13,16) THEN ROUND(0.1 + UNIFORM(0, 0.2, RANDOM()), 2)  -- Robots (less vibration)
+        WHEN asset_id IN (1,2,4,5,7,8,11,14,17) THEN ROUND(0.3 + (days_elapsed * 0.002) + UNIFORM(0, 0.4, RANDOM()), 2)  -- Rotating equipment
+        WHEN asset_id IN (10,13,16) THEN ROUND(0.1 + (days_elapsed * 0.001) + UNIFORM(0, 0.2, RANDOM()), 2)  -- Robots (less vibration)
         ELSE ROUND(0.05 + UNIFORM(0, 0.1, RANDOM()), 2)  -- Static equipment
     END as vibration_mm_s,
     
     -- Pressure data (only for pumps, compressors, and pneumatic systems) - controlled range
     CASE 
-        WHEN asset_id IN (1,3,4,7,9,12) THEN ROUND(140 + UNIFORM(0, 20, RANDOM()), 2)  -- Equipment with pressure sensors
+        WHEN asset_id IN (1,3,4,7,9,12) THEN ROUND(140 + UNIFORM(-5, 15, RANDOM()), 2)  -- Equipment with pressure sensors
         ELSE NULL
     END as pressure_psi,
     
     -- Health score (degrades slightly over time, with some variation) - ensure 0-100 range
-    ROUND(GREATEST(75, LEAST(100, 100 - (hour_offset * 0.2) - UNIFORM(0, 5, RANDOM()))), 2) as health_score,
+    ROUND(GREATEST(70, LEAST(100, 100 - (days_elapsed * 0.15) - (hour_of_day * 0.1) - UNIFORM(0, 5, RANDOM()))), 2) as health_score,
     
     -- Failure probability (increases slightly with lower health) - ensure 0-1 range
-    ROUND(LEAST(0.99, GREATEST(0.01, (100 - GREATEST(75, LEAST(100, 100 - (hour_offset * 0.2) - UNIFORM(0, 5, RANDOM())))) / 500.0)), 2) as failure_probability,
+    ROUND(LEAST(0.95, GREATEST(0.01, (100 - GREATEST(70, LEAST(100, 100 - (days_elapsed * 0.15) - (hour_of_day * 0.1) - UNIFORM(0, 5, RANDOM())))) / 400.0)), 2) as failure_probability,
     
     -- Remaining useful life (decreases over time) - ensure positive integer
-    GREATEST(1, ROUND(400 - (hour_offset * 0.5) - UNIFORM(0, 20, RANDOM()), 0))::INTEGER as rul_days,
+    GREATEST(1, ROUND(400 - (days_elapsed * 0.8) - UNIFORM(0, 20, RANDOM()), 0))::INTEGER as rul_days,
     
     -- Mark as anomalous based on controlled thresholds
     CASE 
-        WHEN GREATEST(75, LEAST(100, 100 - (hour_offset * 0.2) - UNIFORM(0, 5, RANDOM()))) < 85 THEN TRUE
-        WHEN asset_id IN (1,2,4,5,7,8,11,14,17) AND (0.3 + UNIFORM(0, 0.4, RANDOM())) > 1.5 THEN TRUE
+        WHEN GREATEST(70, LEAST(100, 100 - (days_elapsed * 0.15) - (hour_of_day * 0.1) - UNIFORM(0, 5, RANDOM()))) < 80 THEN TRUE
+        WHEN asset_id IN (1,2,4,5,7,8,11,14,17) AND (0.3 + (days_elapsed * 0.002) + UNIFORM(0, 0.4, RANDOM())) > 1.2 THEN TRUE
         ELSE FALSE
     END as is_anomalous
 FROM hourly_base;
 
--- Maintenance Log (3 events per asset = 54 total maintenance events)
-INSERT INTO FCT_MAINTENANCE_LOG (ASSET_ID, WO_TYPE_ID, ACTION_DATE_SK, COMPLETED_DATE, DOWNTIME_HOURS, PARTS_COST, LABOR_COST, FAILURE_FLAG, TECHNICIAN_ID, FAILURE_CODE_ID, TECHNICIAN_NOTES) VALUES
--- Asset 1 Maintenance History
-(1, 3, 20250815, '2025-08-15', 2.5, 150.00, 400.00, FALSE, 1, NULL, 'Routine preventive maintenance - lubrication and inspection completed'),
-(1, 2, 20250901, '2025-09-01', 1.5, 75.00, 300.00, FALSE, 2, NULL, 'Predictive maintenance based on vibration analysis'),
-(1, 1, 20250923, '2025-09-23', 4.0, 250.00, 600.00, TRUE, 1, 1, 'Emergency repair - bearing misalignment corrected'),
+-- Maintenance Log (Dynamic generation from Sept 1, 2025 to current date)
+-- Each asset gets maintenance events based on realistic frequencies:
+-- - Preventive Maintenance (PM): Every 30 days
+-- - Inspections: Every 15 days
+-- - Predictive Maintenance: Every 20 days
+-- - Emergency repairs: Randomly, 5% chance
+INSERT INTO FCT_MAINTENANCE_LOG (ASSET_ID, PROCESS_ID, WO_TYPE_ID, ACTION_DATE_SK, COMPLETED_DATE, DOWNTIME_HOURS, PARTS_COST, LABOR_COST, FAILURE_FLAG, TECHNICIAN_ID, FAILURE_CODE_ID, TECHNICIAN_NOTES)
+WITH date_params AS (
+    SELECT 
+        '2025-09-01'::DATE AS start_date,
+        CURRENT_DATE() AS end_date
+),
+daily_asset_base AS (
+    SELECT 
+        a.asset_id,
+        a.process_id,
+        DATEADD(DAY, d.day_seq, dp.start_date) as maint_date,
+        d.day_seq,
+        TO_NUMBER(TO_CHAR(DATEADD(DAY, d.day_seq, dp.start_date), 'YYYYMMDD')) as date_sk
+    FROM date_params dp
+    CROSS JOIN (
+        SELECT 
+            da.ASSET_ID,
+            da.PROCESS_ID
+        FROM HYPERFORGE.SILVER.DIM_ASSET da
+        WHERE da.IS_CURRENT = TRUE
+    ) a
+    CROSS JOIN (
+        SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS day_seq
+        FROM TABLE(GENERATOR(ROWCOUNT => 365))
+    ) d
+    WHERE DATEADD(DAY, d.day_seq, dp.start_date) <= dp.end_date
+),
+maintenance_events AS (
+    SELECT 
+        asset_id,
+        process_id,
+        maint_date,
+        date_sk,
+        day_seq,
+        -- Determine work order type based on patterns
+        CASE 
+            WHEN MOD(day_seq, 30) = MOD(asset_id, 30) THEN 3  -- Preventive Maintenance every 30 days
+            WHEN MOD(day_seq, 15) = MOD(asset_id, 15) THEN 4  -- Inspection every 15 days
+            WHEN MOD(day_seq, 20) = MOD((asset_id * 2), 20) THEN 2  -- Predictive Maintenance every 20 days
+            WHEN UNIFORM(0, 100, RANDOM()) < 2 THEN 1  -- 2% chance of emergency repair
+            ELSE NULL
+        END as wo_type_id,
+        -- Assign technician (rotate through available technicians)
+        MOD((asset_id + day_seq), 10) + 1 as technician_id
+    FROM daily_asset_base
+),
+maint_with_details AS (
+    SELECT 
+        me.*,
+        -- Downtime hours based on work order type
+        CASE 
+            WHEN wo_type_id = 1 THEN ROUND(4 + UNIFORM(0, 4, RANDOM()), 1)  -- Emergency: 4-8 hours
+            WHEN wo_type_id = 2 THEN ROUND(1 + UNIFORM(0, 2, RANDOM()), 1)  -- Predictive: 1-3 hours
+            WHEN wo_type_id = 3 THEN ROUND(2 + UNIFORM(0, 3, RANDOM()), 1)  -- Preventive: 2-5 hours
+            WHEN wo_type_id = 4 THEN ROUND(0.5 + UNIFORM(0, 1, RANDOM()), 1)  -- Inspection: 0.5-1.5 hours
+            ELSE 0
+        END as downtime_hours,
+        -- Parts cost
+        CASE 
+            WHEN wo_type_id = 1 THEN ROUND(300 + UNIFORM(0, 500, RANDOM()), 2)  -- Emergency: $300-800
+            WHEN wo_type_id = 2 THEN ROUND(50 + UNIFORM(0, 150, RANDOM()), 2)   -- Predictive: $50-200
+            WHEN wo_type_id = 3 THEN ROUND(100 + UNIFORM(0, 200, RANDOM()), 2)  -- Preventive: $100-300
+            WHEN wo_type_id = 4 THEN ROUND(0 + UNIFORM(0, 50, RANDOM()), 2)     -- Inspection: $0-50
+            ELSE 0
+        END as parts_cost,
+        -- Labor cost (based on downtime * hourly rate $150-200/hr)
+        CASE 
+            WHEN wo_type_id = 1 THEN ROUND((4 + UNIFORM(0, 4, RANDOM())) * 180, 2)
+            WHEN wo_type_id = 2 THEN ROUND((1 + UNIFORM(0, 2, RANDOM())) * 160, 2)
+            WHEN wo_type_id = 3 THEN ROUND((2 + UNIFORM(0, 3, RANDOM())) * 150, 2)
+            WHEN wo_type_id = 4 THEN ROUND((0.5 + UNIFORM(0, 1, RANDOM())) * 140, 2)
+            ELSE 0
+        END as labor_cost,
+        -- Failure flag and failure code (only for emergency repairs)
+        CASE WHEN wo_type_id = 1 THEN TRUE ELSE FALSE END as failure_flag,
+        CASE 
+            WHEN wo_type_id = 1 THEN MOD((asset_id + day_seq), 12) + 1  -- Rotate through 12 failure codes
+            ELSE NULL 
+        END as failure_code_id,
+        -- Notes based on work order type and asset
+        CASE 
+            WHEN wo_type_id = 1 THEN 'Emergency repair - ' || 
+                CASE MOD(asset_id, 6)
+                    WHEN 0 THEN 'bearing failure requiring immediate replacement'
+                    WHEN 1 THEN 'unexpected shutdown due to overheating'
+                    WHEN 2 THEN 'seal failure causing fluid leak'
+                    WHEN 3 THEN 'electrical fault requiring repair'
+                    WHEN 4 THEN 'mechanical failure requiring parts replacement'
+                    ELSE 'critical component failure addressed'
+                END
+            WHEN wo_type_id = 2 THEN 'Predictive maintenance - ' || 
+                CASE MOD(asset_id, 4)
+                    WHEN 0 THEN 'proactive component replacement based on sensor data'
+                    WHEN 1 THEN 'condition-based maintenance preventing failure'
+                    WHEN 2 THEN 'vibration analysis indicated need for adjustment'
+                    ELSE 'temperature trends suggested preventive action'
+                END
+            WHEN wo_type_id = 3 THEN 'Preventive maintenance - ' || 
+                CASE MOD(asset_id, 4)
+                    WHEN 0 THEN 'scheduled lubrication and inspection completed'
+                    WHEN 1 THEN 'routine service and parts replacement per schedule'
+                    WHEN 2 THEN 'planned maintenance activities completed'
+                    ELSE 'standard PM tasks performed successfully'
+                END
+            WHEN wo_type_id = 4 THEN 'Routine inspection - ' || 
+                CASE MOD(asset_id, 3)
+                    WHEN 0 THEN 'visual inspection and sensor verification'
+                    WHEN 1 THEN 'performance monitoring and calibration check'
+                    ELSE 'standard inspection completed, no issues found'
+                END
+            ELSE 'Maintenance activity completed'
+        END as technician_notes
+    FROM maintenance_events me
+    WHERE wo_type_id IS NOT NULL
+)
+SELECT 
+    asset_id,
+    process_id,
+    wo_type_id,
+    date_sk,
+    maint_date as completed_date,
+    downtime_hours,
+    parts_cost,
+    labor_cost,
+    failure_flag,
+    technician_id,
+    failure_code_id,
+    technician_notes
+FROM maint_with_details;
 
--- Asset 2 Maintenance History  
-(2, 3, 20250810, '2025-08-10', 3.0, 200.00, 450.00, FALSE, 2, NULL, 'Scheduled motor maintenance - winding inspection and cleaning'),
-(2, 4, 20250825, '2025-08-25', 0.5, 0.00, 150.00, FALSE, 3, NULL, 'Routine inspection - no issues found'),
-(2, 2, 20250910, '2025-09-10', 2.0, 125.00, 350.00, FALSE, 1, NULL, 'Predictive maintenance - bearing replacement based on temperature trends'),
+-- Production Log (Daily production data for all assets from Sept 1, 2025 to current date)
+-- Generates daily production metrics with realistic variations and maintenance impacts
+INSERT INTO FCT_PRODUCTION_LOG (ASSET_ID, PROCESS_ID, DATE_SK, PRODUCTION_DATE, PLANNED_RUNTIME_HOURS, ACTUAL_RUNTIME_HOURS, UNITS_PRODUCED, UNITS_SCRAPPED)
+WITH date_params AS (
+    SELECT 
+        '2025-09-01'::DATE AS start_date,
+        CURRENT_DATE() AS end_date
+),
+daily_production_base AS (
+    SELECT 
+        a.asset_id,
+        a.process_id,
+        DATEADD(DAY, d.day_seq, dp.start_date) as production_date,
+        TO_NUMBER(TO_CHAR(DATEADD(DAY, d.day_seq, dp.start_date), 'YYYYMMDD')) as date_sk,
+        d.day_seq,
+        DAYOFWEEK(DATEADD(DAY, d.day_seq, dp.start_date)) as day_of_week
+    FROM date_params dp
+    CROSS JOIN (
+        SELECT 
+            da.ASSET_ID,
+            da.PROCESS_ID
+        FROM HYPERFORGE.SILVER.DIM_ASSET da
+        WHERE da.IS_CURRENT = TRUE
+    ) a
+    CROSS JOIN (
+        SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) - 1 AS day_seq
+        FROM TABLE(GENERATOR(ROWCOUNT => 365))
+    ) d
+    WHERE DATEADD(DAY, d.day_seq, dp.start_date) <= dp.end_date
+),
+production_with_maint AS (
+    SELECT 
+        pb.asset_id,
+        pb.process_id,
+        pb.production_date,
+        pb.date_sk,
+        pb.day_seq,
+        pb.day_of_week,
+        -- Check if there was maintenance on this day
+        COALESCE(ml.downtime_hours, 0) as maint_downtime,
+        COALESCE(ml.failure_flag, FALSE) as had_failure
+    FROM daily_production_base pb
+    LEFT JOIN HYPERFORGE.SILVER.FCT_MAINTENANCE_LOG ml 
+        ON pb.asset_id = ml.asset_id 
+        AND pb.date_sk = ml.action_date_sk
+)
+SELECT 
+    asset_id,
+    process_id,
+    date_sk,
+    production_date,
+    -- Planned runtime varies by asset class
+    CASE 
+        WHEN asset_id IN (1,2,3,4,5,6,7,8,9) THEN 24.0  -- Davidson plant runs 24/7
+        WHEN asset_id IN (10,11,12,13,14,15) THEN 20.0  -- Charlotte Assembly line 1&2
+        ELSE 18.0  -- Charlotte Assembly line 3
+    END as planned_runtime_hours,
+    -- Actual runtime (reduced by maintenance and random variations)
+    CASE 
+        WHEN asset_id IN (1,2,3,4,5,6,7,8,9) THEN 
+            GREATEST(0, ROUND(24.0 - maint_downtime - UNIFORM(0, 1.5, RANDOM()), 1))
+        WHEN asset_id IN (10,11,12,13,14,15) THEN 
+            GREATEST(0, ROUND(20.0 - maint_downtime - UNIFORM(0, 1.2, RANDOM()), 1))
+        ELSE 
+            GREATEST(0, ROUND(18.0 - maint_downtime - UNIFORM(0, 1.0, RANDOM()), 1))
+    END as actual_runtime_hours,
+    -- Units produced (based on asset capacity and actual runtime)
+    CASE 
+        WHEN asset_id IN (1,2,3,4,5,6,7,8,9) THEN 
+            ROUND((24.0 - maint_downtime - UNIFORM(0, 1.5, RANDOM())) * 
+                CASE asset_id
+                    WHEN 1 THEN 50  -- Primary Coolant Pump: 50 units/hr
+                    WHEN 2 THEN 100  -- Conveyor Drive Motor: 100 units/hr
+                    WHEN 3 THEN 48  -- Air Compressor: 48 units/hr
+                    WHEN 4 THEN 49  -- Hydraulic Pump: 49 units/hr
+                    WHEN 5 THEN 50  -- Main Drive Motor: 50 units/hr
+                    WHEN 6 THEN 50  -- Cooling Fan: 50 units/hr
+                    WHEN 7 THEN 48  -- Process Circulation Pump: 48 units/hr
+                    WHEN 8 THEN 49  -- Conveyor Motor Assembly: 49 units/hr
+                    ELSE 49  -- Control Valve System: 49 units/hr
+                END, 0)::INTEGER
+        WHEN asset_id IN (10,11,12,13,14,15) THEN 
+            ROUND((20.0 - maint_downtime - UNIFORM(0, 1.2, RANDOM())) * 
+                CASE asset_id
+                    WHEN 10 THEN 50  -- Assembly Robot: 50 units/hr
+                    WHEN 11 THEN 49  -- Conveyor Drive System: 49 units/hr
+                    WHEN 12 THEN 48  -- Pneumatic Press: 48 units/hr
+                    WHEN 13 THEN 50  -- Welding Robot: 50 units/hr
+                    WHEN 14 THEN 49  -- Material Handling Motor: 49 units/hr
+                    ELSE 46  -- Heat Treatment Furnace: 46 units/hr (slower process)
+                END, 0)::INTEGER
+        ELSE 
+            ROUND((18.0 - maint_downtime - UNIFORM(0, 1.0, RANDOM())) * 
+                CASE asset_id
+                    WHEN 16 THEN 50  -- Packaging Robot: 50 units/hr
+                    WHEN 17 THEN 49  -- Sorting System Motor: 49 units/hr
+                    ELSE 50  -- Quality Control Scanner: 50 units/hr
+                END, 0)::INTEGER
+    END as units_produced,
+    -- Units scrapped (higher if there was a failure, normal quality issues otherwise)
+    CASE 
+        WHEN had_failure THEN ROUND(UNIFORM(20, 50, RANDOM()), 0)::INTEGER
+        ELSE ROUND(UNIFORM(3, 15, RANDOM()), 0)::INTEGER
+    END as units_scrapped
+FROM production_with_maint;
 
--- Asset 3 Maintenance History
-(3, 3, 20250805, '2025-08-05', 4.0, 300.00, 500.00, FALSE, 4, NULL, 'Air compressor preventive maintenance - filter and oil change'),
-(3, 1, 20250820, '2025-08-20', 6.0, 450.00, 800.00, TRUE, 2, 6, 'Compressor head failure - complete rebuild required'),
-(3, 4, 20250905, '2025-09-05', 1.0, 25.00, 200.00, FALSE, 3, NULL, 'Post-repair inspection and performance verification'),
-
--- Asset 4 Maintenance History
-(4, 3, 20250812, '2025-08-12', 2.0, 175.00, 375.00, FALSE, 5, NULL, 'Hydraulic system preventive maintenance'),
-(4, 2, 20250828, '2025-08-28', 1.0, 50.00, 250.00, FALSE, 6, NULL, 'Predictive maintenance - seal replacement'),
-(4, 4, 20250915, '2025-09-15', 0.5, 0.00, 125.00, FALSE, 4, NULL, 'Routine hydraulic pressure inspection'),
-
--- Asset 5 Maintenance History
-(5, 3, 20250808, '2025-08-08', 2.5, 180.00, 400.00, FALSE, 2, NULL, 'Drive motor preventive maintenance'),
-(5, 4, 20250822, '2025-08-22', 0.5, 0.00, 150.00, FALSE, 3, NULL, 'Electrical connection inspection'),
-(5, 2, 20250908, '2025-09-08', 1.5, 90.00, 300.00, FALSE, 5, NULL, 'Predictive maintenance based on current analysis'),
-
--- Asset 6 Maintenance History
-(6, 3, 20250814, '2025-08-14', 1.5, 120.00, 275.00, FALSE, 1, NULL, 'Cooling fan preventive maintenance'),
-(6, 4, 20250830, '2025-08-30', 0.5, 0.00, 125.00, FALSE, 4, NULL, 'Fan blade inspection and cleaning'),
-(6, 2, 20250912, '2025-09-12', 1.0, 60.00, 225.00, FALSE, 6, NULL, 'Bearing lubrication based on vibration monitoring'),
-
--- Asset 7 Maintenance History
-(7, 3, 20250807, '2025-08-07', 3.0, 220.00, 425.00, FALSE, 3, NULL, 'Circulation pump preventive maintenance'),
-(7, 1, 20250824, '2025-08-24', 5.0, 400.00, 750.00, TRUE, 1, 5, 'Pump impeller failure - emergency replacement'),
-(7, 4, 20250906, '2025-09-06', 1.0, 0.00, 175.00, FALSE, 2, NULL, 'Post-repair flow rate verification'),
-
--- Asset 8 Maintenance History
-(8, 3, 20250811, '2025-08-11', 2.5, 190.00, 380.00, FALSE, 4, NULL, 'Conveyor motor assembly maintenance'),
-(8, 4, 20250826, '2025-08-26', 0.5, 0.00, 140.00, FALSE, 5, NULL, 'Torque sensor calibration check'),
-(8, 2, 20250911, '2025-09-11', 1.5, 85.00, 290.00, FALSE, 6, NULL, 'Predictive maintenance - coupling replacement'),
-
--- Asset 9 Maintenance History
-(9, 3, 20250809, '2025-08-09', 2.0, 160.00, 320.00, FALSE, 2, NULL, 'Control valve system preventive maintenance'),
-(9, 4, 20250823, '2025-08-23', 1.0, 30.00, 180.00, FALSE, 3, NULL, 'Valve position calibration'),
-(9, 2, 20250907, '2025-09-07', 1.5, 75.00, 270.00, FALSE, 1, NULL, 'Actuator maintenance based on position drift'),
-
--- Asset 10 Maintenance History
-(10, 3, 20250813, '2025-08-13', 4.0, 350.00, 600.00, FALSE, 7, NULL, 'Robot arm preventive maintenance - full service'),
-(10, 4, 20250829, '2025-08-29', 1.5, 0.00, 250.00, FALSE, 8, NULL, 'Joint calibration and accuracy verification'),
-(10, 2, 20250914, '2025-09-14', 2.0, 180.00, 400.00, FALSE, 9, NULL, 'Servo motor replacement based on performance monitoring'),
-
--- Asset 11 Maintenance History
-(11, 3, 20250816, '2025-08-16', 3.0, 210.00, 450.00, FALSE, 4, NULL, 'Conveyor drive system maintenance'),
-(11, 1, 20250831, '2025-08-31', 6.0, 500.00, 900.00, TRUE, 7, 2, 'Motor bearing failure - emergency replacement'),
-(11, 4, 20250916, '2025-09-16', 1.0, 0.00, 200.00, FALSE, 8, NULL, 'Post-repair vibration analysis'),
-
--- Asset 12 Maintenance History
-(12, 3, 20250806, '2025-08-06', 2.5, 200.00, 400.00, FALSE, 5, NULL, 'Pneumatic press preventive maintenance'),
-(12, 4, 20250821, '2025-08-21', 1.0, 40.00, 180.00, FALSE, 6, NULL, 'Force sensor calibration'),
-(12, 2, 20250904, '2025-09-04', 1.5, 95.00, 320.00, FALSE, 4, NULL, 'Cylinder seal replacement based on pressure drop'),
-
--- Asset 13 Maintenance History
-(13, 3, 20250817, '2025-08-17', 4.5, 380.00, 650.00, FALSE, 9, NULL, 'Welding robot preventive maintenance'),
-(13, 4, 20250902, '2025-09-02', 1.5, 25.00, 220.00, FALSE, 10, NULL, 'Welding tip inspection and replacement'),
-(13, 2, 20250918, '2025-09-18', 2.5, 150.00, 420.00, FALSE, 8, NULL, 'Power supply maintenance based on voltage monitoring'),
-
--- Asset 14 Maintenance History
-(14, 3, 20250804, '2025-08-04', 2.5, 185.00, 390.00, FALSE, 1, NULL, 'Material handling motor maintenance'),
-(14, 4, 20250819, '2025-08-19', 0.5, 0.00, 130.00, FALSE, 2, NULL, 'Speed sensor inspection'),
-(14, 2, 20250903, '2025-09-03', 1.5, 80.00, 280.00, FALSE, 3, NULL, 'Belt tensioner adjustment based on speed variance'),
-
--- Asset 15 Maintenance History
-(15, 3, 20250818, '2025-08-18', 6.0, 600.00, 800.00, FALSE, 7, NULL, 'Heat treatment furnace major maintenance'),
-(15, 4, 20250901, '2025-09-01', 2.0, 100.00, 300.00, FALSE, 8, NULL, 'Temperature sensor calibration and gas flow check'),
-(15, 1, 20250920, '2025-09-20', 8.0, 800.00, 1200.00, TRUE, 9, 11, 'Heating element failure - emergency replacement'),
-
--- Asset 16 Maintenance History
-(16, 3, 20250803, '2025-08-03', 3.5, 280.00, 520.00, FALSE, 4, NULL, 'Packaging robot preventive maintenance'),
-(16, 4, 20250817, '2025-08-17', 1.0, 15.00, 160.00, FALSE, 5, NULL, 'End effector inspection and calibration'),
-(16, 2, 20250901, '2025-09-01', 2.0, 120.00, 350.00, FALSE, 6, NULL, 'Drive motor maintenance based on speed monitoring'),
-
--- Asset 17 Maintenance History
-(17, 3, 20250802, '2025-08-02', 2.0, 170.00, 360.00, FALSE, 10, NULL, 'Sorting system motor maintenance'),
-(17, 4, 20250816, '2025-08-16', 0.5, 0.00, 120.00, FALSE, 1, NULL, 'Current monitoring system check'),
-(17, 2, 20250830, '2025-08-30', 1.5, 70.00, 260.00, FALSE, 2, NULL, 'Vibration damper replacement'),
-
--- Asset 18 Maintenance History
-(18, 3, 20250801, '2025-08-01', 2.5, 200.00, 380.00, FALSE, 3, NULL, 'Quality control scanner preventive maintenance'),
-(18, 4, 20250815, '2025-08-15', 1.0, 50.00, 180.00, FALSE, 7, NULL, 'Lens cleaning and light calibration'),
-(18, 2, 20250829, '2025-08-29', 1.5, 85.00, 290.00, FALSE, 8, NULL, 'Image sensor replacement based on scan quality degradation');
-
--- Production Log (Daily production data for all assets)
-INSERT INTO FCT_PRODUCTION_LOG (ASSET_ID, DATE_SK, PRODUCTION_DATE, PLANNED_RUNTIME_HOURS, ACTUAL_RUNTIME_HOURS, UNITS_PRODUCED, UNITS_SCRAPPED) VALUES
--- Production data for 9/22/2025 - All assets
-(1, 20250922, '2025-09-22', 24.0, 23.5, 1250, 15),   -- Primary Coolant Pump - good performance
-(2, 20250922, '2025-09-22', 24.0, 24.0, 2400, 5),    -- Conveyor Drive Motor - excellent
-(3, 20250922, '2025-09-22', 24.0, 22.8, 1140, 12),   -- Air Compressor - minor issues
-(4, 20250922, '2025-09-22', 24.0, 23.2, 1160, 8),    -- Hydraulic Pump - good
-(5, 20250922, '2025-09-22', 24.0, 23.8, 1190, 6),    -- Main Drive Motor - good
-(6, 20250922, '2025-09-22', 24.0, 23.9, 1195, 4),    -- Cooling Fan - excellent
-(7, 20250922, '2025-09-22', 24.0, 23.1, 1155, 10),   -- Process Circulation Pump - good
-(8, 20250922, '2025-09-22', 24.0, 23.6, 1180, 7),    -- Conveyor Motor Assembly - good
-(9, 20250922, '2025-09-22', 24.0, 23.4, 1170, 9),    -- Control Valve System - good
-(10, 20250922, '2025-09-22', 20.0, 19.8, 990, 3),    -- Assembly Robot - excellent quality
-(11, 20250922, '2025-09-22', 20.0, 19.5, 975, 8),    -- Conveyor Drive System - good
-(12, 20250922, '2025-09-22', 20.0, 19.2, 960, 12),   -- Pneumatic Press - minor quality issues
-(13, 20250922, '2025-09-22', 20.0, 19.7, 985, 5),    -- Welding Robot - good
-(14, 20250922, '2025-09-22', 20.0, 19.4, 970, 9),    -- Material Handling Motor - good
-(15, 20250922, '2025-09-22', 20.0, 18.5, 925, 15),   -- Heat Treatment Furnace - quality issues
-(16, 20250922, '2025-09-22', 18.0, 17.8, 890, 6),    -- Packaging Robot - good
-(17, 20250922, '2025-09-22', 18.0, 17.6, 880, 8),    -- Sorting System Motor - good
-(18, 20250922, '2025-09-22', 18.0, 17.9, 895, 4),    -- Quality Control Scanner - excellent
-
--- Production data for 9/23/2025 - Day with some maintenance impacts
-(1, 20250923, '2025-09-23', 24.0, 20.0, 980, 35),    -- Primary Coolant Pump - emergency repair impact
-(2, 20250923, '2025-09-23', 24.0, 23.8, 2380, 8),    -- Conveyor Drive Motor - slight decline
-(3, 20250923, '2025-09-23', 24.0, 23.5, 1175, 10),   -- Air Compressor - improved after maint
-(4, 20250923, '2025-09-23', 24.0, 23.0, 1150, 12),   -- Hydraulic Pump - slight decline
-(5, 20250923, '2025-09-23', 24.0, 23.6, 1180, 9),    -- Main Drive Motor - stable
-(6, 20250923, '2025-09-23', 24.0, 23.7, 1185, 6),    -- Cooling Fan - good
-(7, 20250923, '2025-09-23', 24.0, 19.0, 950, 25),    -- Process Circulation Pump - post-failure impact
-(8, 20250923, '2025-09-23', 24.0, 23.4, 1170, 8),    -- Conveyor Motor Assembly - stable
-(9, 20250923, '2025-09-23', 24.0, 23.2, 1160, 11),   -- Control Valve System - slight decline
-(10, 20250923, '2025-09-23', 20.0, 19.6, 980, 5),    -- Assembly Robot - good
-(11, 20250923, '2025-09-23', 20.0, 16.0, 800, 40),   -- Conveyor Drive System - bearing failure impact
-(12, 20250923, '2025-09-23', 20.0, 19.0, 950, 15),   -- Pneumatic Press - continued quality issues
-(13, 20250923, '2025-09-23', 20.0, 19.5, 975, 7),    -- Welding Robot - stable
-(14, 20250923, '2025-09-23', 20.0, 19.2, 960, 11),   -- Material Handling Motor - slight decline
-(15, 20250923, '2025-09-23', 20.0, 12.0, 600, 50),   -- Heat Treatment Furnace - heating element failure
-(16, 20250923, '2025-09-23', 18.0, 17.6, 880, 8),    -- Packaging Robot - stable
-(17, 20250923, '2025-09-23', 18.0, 17.4, 870, 10),   -- Sorting System Motor - slight decline
-(18, 20250923, '2025-09-23', 18.0, 17.7, 885, 6);    -- Quality Control Scanner - good
-
+-- Maintenance Parts Used (Links maintenance events to materials consumed)
+-- Generates realistic parts usage for each maintenance event based on work order type
+INSERT INTO FCT_MAINTENANCE_PARTS_USED (LOG_ID, MATERIAL_ID, QUANTITY_USED, TOTAL_COST)
+WITH maintenance_logs_with_seq AS (
+    SELECT 
+        ml.LOG_ID,
+        ml.WO_TYPE_ID,
+        ml.ASSET_ID,
+        ml.PARTS_COST,
+        ROW_NUMBER() OVER (ORDER BY ml.LOG_ID) as log_seq
+    FROM HYPERFORGE.SILVER.FCT_MAINTENANCE_LOG ml
+),
+parts_per_maint AS (
+    SELECT 
+        ml.LOG_ID,
+        ml.WO_TYPE_ID,
+        ml.ASSET_ID,
+        ml.PARTS_COST,
+        -- Determine number of parts used based on work order type
+        CASE 
+            WHEN ml.WO_TYPE_ID = 1 THEN UNIFORM(2, 5, RANDOM())  -- Emergency: 2-5 parts
+            WHEN ml.WO_TYPE_ID = 2 THEN UNIFORM(1, 3, RANDOM())  -- Predictive: 1-3 parts
+            WHEN ml.WO_TYPE_ID = 3 THEN UNIFORM(2, 4, RANDOM())  -- Preventive: 2-4 parts
+            WHEN ml.WO_TYPE_ID = 4 THEN UNIFORM(0, 2, RANDOM())  -- Inspection: 0-2 parts
+            ELSE 1
+        END as num_parts
+    FROM maintenance_logs_with_seq ml
+),
+parts_expanded AS (
+    SELECT 
+        pm.LOG_ID,
+        pm.WO_TYPE_ID,
+        pm.ASSET_ID,
+        pm.PARTS_COST,
+        p.part_seq
+    FROM parts_per_maint pm
+    CROSS JOIN (
+        SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) as part_seq
+        FROM TABLE(GENERATOR(ROWCOUNT => 10))
+    ) p
+    WHERE p.part_seq <= pm.num_parts
+)
+SELECT 
+    pe.LOG_ID,
+    -- Select material based on work order type and asset
+    CASE 
+        WHEN pe.WO_TYPE_ID = 1 THEN  -- Emergency repairs use critical parts
+            CASE MOD((pe.ASSET_ID + pe.part_seq), 8)
+                WHEN 0 THEN 2   -- Heavy duty bearing
+                WHEN 1 THEN 4   -- Mechanical seal
+                WHEN 2 THEN 10  -- Servo motor
+                WHEN 3 THEN 16  -- Pump impeller
+                WHEN 4 THEN 14  -- Coupling
+                WHEN 5 THEN 13  -- Solenoid valve
+                WHEN 6 THEN 12  -- Vibration sensor
+                ELSE 11         -- Temperature sensor
+            END
+        WHEN pe.WO_TYPE_ID = 2 THEN  -- Predictive maintenance
+            CASE MOD((pe.ASSET_ID + pe.part_seq), 6)
+                WHEN 0 THEN 1   -- Standard bearing
+                WHEN 1 THEN 3   -- Oil seal
+                WHEN 2 THEN 5   -- Belt
+                WHEN 3 THEN 14  -- Coupling
+                WHEN 4 THEN 11  -- Temperature sensor
+                ELSE 8          -- Synthetic oil
+            END
+        WHEN pe.WO_TYPE_ID = 3 THEN  -- Preventive maintenance
+            CASE MOD((pe.ASSET_ID + pe.part_seq), 7)
+                WHEN 0 THEN 6   -- Hydraulic filter
+                WHEN 1 THEN 7   -- Air filter
+                WHEN 2 THEN 8   -- Gear oil
+                WHEN 3 THEN 9   -- Hydraulic oil
+                WHEN 4 THEN 20  -- Grease
+                WHEN 5 THEN 15  -- Gasket
+                ELSE 3          -- Oil seal
+            END
+        ELSE  -- Inspections use minimal parts
+            CASE MOD((pe.ASSET_ID + pe.part_seq), 4)
+                WHEN 0 THEN 19  -- Fuse
+                WHEN 1 THEN 20  -- Grease
+                WHEN 2 THEN 15  -- Gasket
+                ELSE 8          -- Oil
+            END
+    END as material_id,
+    -- Quantity varies by part type
+    CASE 
+        WHEN pe.WO_TYPE_ID = 1 THEN ROUND(UNIFORM(1, 3, RANDOM()), 1)  -- Emergency: 1-3 units
+        WHEN pe.WO_TYPE_ID = 2 THEN ROUND(UNIFORM(1, 2, RANDOM()), 1)  -- Predictive: 1-2 units
+        WHEN pe.WO_TYPE_ID = 3 THEN ROUND(UNIFORM(1, 2, RANDOM()), 1)  -- Preventive: 1-2 units
+        ELSE 1  -- Inspection: 1 unit
+    END as quantity_used,
+    -- Calculate cost based on material and quantity
+    ROUND(
+        CASE 
+            WHEN pe.WO_TYPE_ID = 1 THEN UNIFORM(1, 3, RANDOM())
+            WHEN pe.WO_TYPE_ID = 2 THEN UNIFORM(1, 2, RANDOM())
+            WHEN pe.WO_TYPE_ID = 3 THEN UNIFORM(1, 2, RANDOM())
+            ELSE 1
+        END * 
+        -- Approximate cost per material (simplified for dynamic generation)
+        CASE MOD((pe.ASSET_ID + pe.part_seq), 20) + 1
+            WHEN 1 THEN 25.50
+            WHEN 2 THEN 85.00
+            WHEN 3 THEN 12.75
+            WHEN 4 THEN 145.00
+            WHEN 5 THEN 18.50
+            WHEN 6 THEN 42.00
+            WHEN 7 THEN 38.50
+            WHEN 8 THEN 55.00
+            WHEN 9 THEN 95.00
+            WHEN 10 THEN 850.00
+            WHEN 11 THEN 75.00
+            WHEN 12 THEN 425.00
+            WHEN 13 THEN 165.00
+            WHEN 14 THEN 95.00
+            WHEN 15 THEN 22.00
+            WHEN 16 THEN 320.00
+            WHEN 17 THEN 85.00
+            WHEN 18 THEN 45.00
+            WHEN 19 THEN 8.50
+            ELSE 15.75
+        END
+    , 2) as total_cost
+FROM parts_expanded pe;
 
 -- Insert into GOLD Layer
 USE SCHEMA HYPERFORGE.GOLD;
-INSERT INTO AGG_ASSET_HOURLY_HEALTH (HOUR_TIMESTAMP, ASSET_ID, AVG_TEMPERATURE_C, MAX_VIBRATION_MM_S, STDDEV_PRESSURE_PSI, LATEST_HEALTH_SCORE, AVG_FAILURE_PROBABILITY, MIN_RUL_DAYS) VALUES
-('2025-09-22 10:00:00', 1, 65.2, 0.51, 1.2, 98.5, 0.02, 365),
-('2025-09-22 11:00:00', 1, 66.1, 0.55, 1.1, 98.2, 0.03, 364),
-('2025-09-23 08:00:00', 1, 75.8, 2.15, 5.8, 35.1, 0.85, 7), -- Health score drops significantly with failure prediction
-('2025-09-22 10:00:00', 2, 68.5, 0.32, NULL, 99.1, 0.01, 400),
-('2025-09-23 08:00:00', 2, 69.2, 0.34, NULL, 98.8, 0.02, 399);
 
-INSERT INTO ML_FEATURE_STORE (OBSERVATION_DATE_SK, ASSET_ID, AVG_TEMP_LAST_24H, VIBRATION_STDDEV_7D, PRESSURE_TREND_7D, CYCLES_SINCE_LAST_PM, DAYS_SINCE_LAST_FAILURE, OEM_FAILURE_RATE_EST, DOWNTIME_IMPACT_RISK, FAILED_IN_NEXT_7_DAYS) VALUES
-(20250923, 1, 71.5, 0.87, 2.3, 8500, 180, 0.15, 63750.00, TRUE), -- This asset failed, high risk due to downtime impact
-(20250923, 2, 68.8, 0.12, NULL, 12000, 365, 0.08, 20000.00, FALSE); -- Motor asset performing well
+-- AGG_ASSET_HOURLY_HEALTH: Aggregated hourly health metrics from telemetry data
+INSERT INTO AGG_ASSET_HOURLY_HEALTH (HOUR_TIMESTAMP, ASSET_ID, AVG_TEMPERATURE_C, MAX_VIBRATION_MM_S, STDDEV_PRESSURE_PSI, LATEST_HEALTH_SCORE, AVG_FAILURE_PROBABILITY, MIN_RUL_DAYS)
+SELECT 
+    DATE_TRUNC('HOUR', t.RECORDED_AT) as hour_timestamp,
+    t.ASSET_ID,
+    ROUND(AVG(t.TEMPERATURE_C), 2) as avg_temperature_c,
+    ROUND(MAX(t.VIBRATION_MM_S), 2) as max_vibration_mm_s,
+    ROUND(STDDEV(t.PRESSURE_PSI), 2) as stddev_pressure_psi,
+    -- Get the latest health score within the hour
+    MAX(t.HEALTH_SCORE) as latest_health_score,
+    ROUND(AVG(t.FAILURE_PROBABILITY), 2) as avg_failure_probability,
+    MIN(t.RUL_DAYS) as min_rul_days
+FROM HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY t
+WHERE t.RECORDED_AT >= '2025-09-01 00:00:00'::TIMESTAMP_NTZ
+GROUP BY 
+    DATE_TRUNC('HOUR', t.RECORDED_AT),
+    t.ASSET_ID
+ORDER BY hour_timestamp, asset_id;
+
+-- ML_FEATURE_STORE: Daily feature store for machine learning models
+INSERT INTO ML_FEATURE_STORE (OBSERVATION_DATE_SK, ASSET_ID, AVG_TEMP_LAST_24H, VIBRATION_STDDEV_7D, PRESSURE_TREND_7D, CYCLES_SINCE_LAST_PM, DAYS_SINCE_LAST_FAILURE, OEM_FAILURE_RATE_EST, DOWNTIME_IMPACT_RISK, FAILED_IN_NEXT_7_DAYS)
+WITH daily_observations AS (
+    SELECT DISTINCT
+        t.DATE_SK as observation_date_sk,
+        t.ASSET_ID,
+        t.RECORDED_AT::DATE as observation_date
+    FROM HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY t
+    WHERE t.RECORDED_AT >= '2025-09-01'::DATE
+),
+temp_features AS (
+    SELECT 
+        do.observation_date_sk,
+        do.ASSET_ID,
+        ROUND(AVG(t.TEMPERATURE_C), 2) as avg_temp_last_24h
+    FROM daily_observations do
+    JOIN HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY t 
+        ON do.ASSET_ID = t.ASSET_ID
+        AND t.RECORDED_AT >= DATEADD(HOUR, -24, do.observation_date::TIMESTAMP_NTZ)
+        AND t.RECORDED_AT < DATEADD(DAY, 1, do.observation_date::TIMESTAMP_NTZ)
+    GROUP BY do.observation_date_sk, do.ASSET_ID
+),
+vibration_features AS (
+    SELECT 
+        do.observation_date_sk,
+        do.ASSET_ID,
+        ROUND(STDDEV(t.VIBRATION_MM_S), 2) as vibration_stddev_7d
+    FROM daily_observations do
+    JOIN HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY t 
+        ON do.ASSET_ID = t.ASSET_ID
+        AND t.RECORDED_AT >= DATEADD(DAY, -7, do.observation_date::TIMESTAMP_NTZ)
+        AND t.RECORDED_AT < DATEADD(DAY, 1, do.observation_date::TIMESTAMP_NTZ)
+    GROUP BY do.observation_date_sk, do.ASSET_ID
+),
+pressure_features AS (
+    SELECT 
+        do.observation_date_sk,
+        do.ASSET_ID,
+        ROUND(
+            (MAX(t.PRESSURE_PSI) - MIN(t.PRESSURE_PSI)) / NULLIF(COUNT(*), 0), 
+        2) as pressure_trend_7d
+    FROM daily_observations do
+    JOIN HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY t 
+        ON do.ASSET_ID = t.ASSET_ID
+        AND t.RECORDED_AT >= DATEADD(DAY, -7, do.observation_date::TIMESTAMP_NTZ)
+        AND t.RECORDED_AT < DATEADD(DAY, 1, do.observation_date::TIMESTAMP_NTZ)
+        AND t.PRESSURE_PSI IS NOT NULL
+    GROUP BY do.observation_date_sk, do.ASSET_ID
+),
+maintenance_features AS (
+    SELECT 
+        do.observation_date_sk,
+        do.ASSET_ID,
+        do.observation_date,
+        -- Days since last preventive maintenance
+        COALESCE(DATEDIFF(DAY, 
+            MAX(CASE WHEN ml.WO_TYPE_ID = 3 THEN ml.COMPLETED_DATE END), 
+            do.observation_date), 
+        999) as days_since_last_pm,
+        -- Days since last failure
+        COALESCE(DATEDIFF(DAY, 
+            MAX(CASE WHEN ml.FAILURE_FLAG = TRUE THEN ml.COMPLETED_DATE END), 
+            do.observation_date), 
+        999) as days_since_last_failure
+    FROM daily_observations do
+    LEFT JOIN HYPERFORGE.SILVER.FCT_MAINTENANCE_LOG ml 
+        ON do.ASSET_ID = ml.ASSET_ID
+        AND ml.COMPLETED_DATE < do.observation_date
+    GROUP BY do.observation_date_sk, do.ASSET_ID, do.observation_date
+),
+future_failures AS (
+    SELECT 
+        do.observation_date_sk,
+        do.ASSET_ID,
+        -- Check if there was a failure in the next 7 days
+        MAX(CASE 
+            WHEN ml.FAILURE_FLAG = TRUE 
+                AND ml.COMPLETED_DATE > do.observation_date 
+                AND ml.COMPLETED_DATE <= DATEADD(DAY, 7, do.observation_date)
+            THEN TRUE 
+            ELSE FALSE 
+        END) as failed_in_next_7_days
+    FROM daily_observations do
+    LEFT JOIN HYPERFORGE.SILVER.FCT_MAINTENANCE_LOG ml 
+        ON do.ASSET_ID = ml.ASSET_ID
+    GROUP BY do.observation_date_sk, do.ASSET_ID
+)
+SELECT 
+    do.observation_date_sk,
+    do.ASSET_ID,
+    tf.avg_temp_last_24h,
+    vf.vibration_stddev_7d,
+    pf.pressure_trend_7d,
+    -- Cycles approximation (hours * 60 for cycles per hour estimate)
+    GREATEST(0, mf.days_since_last_pm * 24 * 50) as cycles_since_last_pm,
+    mf.days_since_last_failure,
+    -- OEM failure rate estimate (based on asset age and type)
+    ROUND(0.08 + UNIFORM(0, 0.12, RANDOM()), 2) as oem_failure_rate_est,
+    -- Downtime impact risk (health score * downtime impact per hour)
+    ROUND(
+        (100 - COALESCE(h.latest_health_score, 95)) * a.DOWNTIME_IMPACT_PER_HOUR,
+    2) as downtime_impact_risk,
+    ff.failed_in_next_7_days
+FROM daily_observations do
+LEFT JOIN temp_features tf ON do.observation_date_sk = tf.observation_date_sk AND do.ASSET_ID = tf.ASSET_ID
+LEFT JOIN vibration_features vf ON do.observation_date_sk = vf.observation_date_sk AND do.ASSET_ID = vf.ASSET_ID
+LEFT JOIN pressure_features pf ON do.observation_date_sk = pf.observation_date_sk AND do.ASSET_ID = pf.ASSET_ID
+LEFT JOIN maintenance_features mf ON do.observation_date_sk = mf.observation_date_sk AND do.ASSET_ID = mf.ASSET_ID
+LEFT JOIN future_failures ff ON do.observation_date_sk = ff.observation_date_sk AND do.ASSET_ID = ff.ASSET_ID
+LEFT JOIN HYPERFORGE.SILVER.DIM_ASSET a ON do.ASSET_ID = a.ASSET_ID
+LEFT JOIN (
+    SELECT 
+        ASSET_ID,
+        DATE_SK,
+        MAX(HEALTH_SCORE) as latest_health_score
+    FROM HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY
+    GROUP BY ASSET_ID, DATE_SK
+) h ON do.ASSET_ID = h.ASSET_ID AND do.observation_date_sk = h.DATE_SK
+WHERE do.observation_date >= '2025-09-01'::DATE
+ORDER BY do.observation_date_sk, do.ASSET_ID;
 
 /*************************************************************************************************/
 -- Step 3: Create Stage and Semantic View for Cortex Analyst

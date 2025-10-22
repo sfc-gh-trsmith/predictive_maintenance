@@ -146,6 +146,70 @@ tables:
         sample_values:
           - '0.87'
           - '0.12'
+  - name: DIM_PROCESS
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_PROCESS
+    dimensions:
+      - name: PROCESS_ID
+        description: Unique identifier for a manufacturing process within a production line.
+        expr: PROCESS_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: PROCESS_NK
+        description: Natural key for the process, typically a process code or identifier.
+        expr: PROCESS_NK
+        data_type: VARCHAR(50)
+        sample_values:
+          - machining_process_a
+          - assembly_process_a
+          - testing_process_a
+      - name: PROCESS_NAME
+        description: The name of the manufacturing process.
+        expr: PROCESS_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - Machining Operations
+          - Assembly Operations
+          - Quality Testing
+      - name: PROCESS_TYPE
+        description: The type of process, such as Manufacturing, Assembly, or Testing.
+        expr: PROCESS_TYPE
+        data_type: VARCHAR(50)
+        sample_values:
+          - Manufacturing
+          - Assembly
+          - Testing
+      - name: LINE_ID
+        description: Unique identifier for the production line this process belongs to.
+        expr: LINE_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '101'
+          - '102'
+          - '201'
+      - name: DESCRIPTION
+        description: Detailed description of the manufacturing process.
+        expr: DESCRIPTION
+        data_type: VARCHAR(255)
+        sample_values:
+          - Primary machining operations including cutting, drilling, and shaping
+          - Component assembly and integration operations
+          - Quality control and testing operations
+      - name: IS_ACTIVE
+        description: Indicates whether the process is currently active.
+        expr: IS_ACTIVE
+        data_type: BOOLEAN
+        sample_values:
+          - 'TRUE'
+    facts: []
+    primary_key:
+      columns:
+        - PROCESS_ID
   - name: DIM_ASSET
     base_table:
       database: HYPERFORGE
@@ -161,7 +225,7 @@ tables:
       - name: ASSET_ID
         description: Unique identifier for an asset.
         expr: ASSET_ID
-        data_type: NUMBER(38,0)
+        data_type: INTEGER
         sample_values:
           - '1'
           - '2'
@@ -177,20 +241,14 @@ tables:
         expr: ASSET_NK
         data_type: VARCHAR(50)
         sample_values:
-          - EQ-PUMP-001
-          - EQ-MOTOR-007
+          - eq_pump_001
+          - eq_motor_007
       - name: IS_CURRENT
         description: Indicates whether the asset is currently active or in use.
         expr: IS_CURRENT
         data_type: BOOLEAN
         sample_values:
           - 'TRUE'
-      - name: LINE_ID
-        description: Unique identifier for a specific line or route in the transportation network.
-        expr: LINE_ID
-        data_type: NUMBER(10,0)
-        sample_values:
-          - '101'
       - name: MODEL
         description: The type of asset or equipment used in the organization, such as a specific model of pump or engine.
         expr: MODEL
@@ -205,6 +263,22 @@ tables:
         sample_values:
           - FlowServe
           - Siemens
+      - name: PROCESS_ID
+        description: Unique identifier for the manufacturing process this asset belongs to.
+        expr: PROCESS_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: PROCESS_SEQUENCE
+        description: The sequence number of this asset within its manufacturing process.
+        expr: PROCESS_SEQUENCE
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
     time_dimensions:
       - name: INSTALLATION_DATE
         description: Date when the asset was installed.
@@ -466,6 +540,171 @@ tables:
     primary_key:
       columns:
         - WO_TYPE_ID
+  - name: DIM_TECHNICIAN
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_TECHNICIAN
+    dimensions:
+      - name: TECHNICIAN_ID
+        description: Unique identifier for a technician.
+        expr: TECHNICIAN_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: EMPLOYEE_NK
+        description: Natural key for the employee from the HR system.
+        expr: EMPLOYEE_NK
+        data_type: VARCHAR(20)
+        sample_values:
+          - EMP001
+          - EMP002
+          - EMP003
+      - name: TECHNICIAN_NAME
+        description: The name of the technician.
+        expr: TECHNICIAN_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - John Martinez
+          - Sarah Chen
+          - Mike Johnson
+      - name: CRAFT
+        description: The craft or specialty of the technician.
+        expr: CRAFT
+        data_type: VARCHAR(50)
+        sample_values:
+          - Mechanic
+          - Electrician
+          - Instrumentation
+      - name: SHIFT
+        description: The shift the technician works.
+        expr: SHIFT
+        data_type: VARCHAR(10)
+        sample_values:
+          - Day
+          - Evening
+          - Night
+      - name: IS_ACTIVE
+        description: Indicates whether the technician is currently active.
+        expr: IS_ACTIVE
+        data_type: BOOLEAN
+        sample_values:
+          - 'TRUE'
+    time_dimensions:
+      - name: HIRE_DATE
+        description: Date when the technician was hired.
+        expr: HIRE_DATE
+        data_type: DATE
+        sample_values:
+          - '2020-03-15'
+          - '2019-08-22'
+          - '2021-01-10'
+    facts: []
+    primary_key:
+      columns:
+        - TECHNICIAN_ID
+  - name: DIM_FAILURE_CODE
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_FAILURE_CODE
+    dimensions:
+      - name: FAILURE_CODE_ID
+        description: Unique identifier for a failure code.
+        expr: FAILURE_CODE_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: FAILURE_HIERARCHY_1
+        description: First level of failure hierarchy, such as Mechanical, Electrical, or Operational.
+        expr: FAILURE_HIERARCHY_1
+        data_type: VARCHAR(50)
+        sample_values:
+          - Mechanical
+          - Electrical
+          - Operational
+      - name: FAILURE_HIERARCHY_2
+        description: Second level of failure hierarchy, such as Bearing, Motor, or Seal.
+        expr: FAILURE_HIERARCHY_2
+        data_type: VARCHAR(50)
+        sample_values:
+          - Bearing
+          - Motor
+          - Seal
+      - name: FAILURE_HIERARCHY_3
+        description: Third level of failure hierarchy, such as Over-lubrication, Misalignment, or Contamination.
+        expr: FAILURE_HIERARCHY_3
+        data_type: VARCHAR(50)
+        sample_values:
+          - Over-lubrication
+          - Misalignment
+          - Contamination
+      - name: FAILURE_DESCRIPTION
+        description: Detailed description of the failure.
+        expr: FAILURE_DESCRIPTION
+        data_type: VARCHAR(255)
+        sample_values:
+          - Bearing misalignment causing excessive vibration and wear
+          - Motor winding failure due to overheating or insulation breakdown
+          - Equipment operated beyond design capacity
+    facts: []
+    primary_key:
+      columns:
+        - FAILURE_CODE_ID
+  - name: DIM_MATERIAL
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: DIM_MATERIAL
+    dimensions:
+      - name: MATERIAL_ID
+        description: Unique identifier for a material or part.
+        expr: MATERIAL_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: MATERIAL_NK
+        description: Natural key for the material, typically a part number or SKU.
+        expr: MATERIAL_NK
+        data_type: VARCHAR(50)
+        sample_values:
+          - BEARING-001
+          - SEAL-002
+          - FILTER-003
+      - name: MATERIAL_DESC
+        description: Description of the material or part.
+        expr: MATERIAL_DESC
+        data_type: VARCHAR(255)
+        sample_values:
+          - High-speed bearing for rotating equipment
+          - Hydraulic seal for pump applications
+          - Air filter for compressor systems
+      - name: SUPPLIER_NAME
+        description: Name of the supplier for this material.
+        expr: SUPPLIER_NAME
+        data_type: VARCHAR(100)
+        sample_values:
+          - SKF Bearings
+          - Parker Hannifin
+          - Donaldson Filters
+    facts:
+      - name: UNIT_COST
+        description: The unit cost of the material.
+        expr: UNIT_COST
+        data_type: NUMBER(10,2)
+        sample_values:
+          - '125.50'
+          - '45.75'
+          - '89.25'
+    primary_key:
+      columns:
+        - MATERIAL_ID
   - name: FCT_ASSET_TELEMETRY
     base_table:
       database: HYPERFORGE
@@ -475,10 +714,18 @@ tables:
       - name: ASSET_ID
         description: Unique identifier for an asset, used to track and monitor its telemetry data.
         expr: ASSET_ID
-        data_type: NUMBER(38,0)
+        data_type: INTEGER
         sample_values:
           - '1'
           - '2'
+      - name: PROCESS_ID
+        description: Unique identifier for the manufacturing process this telemetry data belongs to.
+        expr: PROCESS_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
       - name: DATE_SK
         description: Date key representing the date of the telemetry data, in the format YYYYMMDD.
         expr: DATE_SK
@@ -577,9 +824,17 @@ tables:
       - name: ASSET_ID
         description: Unique identifier for the asset that the maintenance activity was performed on.
         expr: ASSET_ID
-        data_type: NUMBER(38,0)
+        data_type: INTEGER
         sample_values:
           - '1'
+      - name: PROCESS_ID
+        description: Unique identifier for the manufacturing process this maintenance activity belongs to.
+        expr: PROCESS_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
       - name: FAILURE_FLAG
         description: TRUE if this action was in response to a failure
         expr: FAILURE_FLAG
@@ -592,6 +847,22 @@ tables:
         data_type: NUMBER(38,0)
         sample_values:
           - '1'
+      - name: TECHNICIAN_ID
+        description: Unique identifier for the technician who performed the maintenance.
+        expr: TECHNICIAN_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: FAILURE_CODE_ID
+        description: Unique identifier for the failure code, populated when FAILURE_FLAG is TRUE.
+        expr: FAILURE_CODE_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
       - name: TECHNICIAN_NOTES
         description: Free-form text notes recorded by the technician during maintenance activities, detailing the issues encountered, actions taken, and any other relevant information.
         expr: TECHNICIAN_NOTES
@@ -642,10 +913,18 @@ tables:
       - name: ASSET_ID
         description: Unique identifier for the asset being produced.
         expr: ASSET_ID
-        data_type: NUMBER(38,0)
+        data_type: INTEGER
         sample_values:
           - '1'
           - '2'
+      - name: PROCESS_ID
+        description: Unique identifier for the manufacturing process this production data belongs to.
+        expr: PROCESS_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
       - name: DATE_SK
         description: Date key representing the date of production in the format YYYYMMDD.
         expr: DATE_SK
@@ -703,25 +982,130 @@ tables:
     primary_key:
       columns:
         - PROD_LOG_ID
+  - name: FCT_MAINTENANCE_PARTS_USED
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: FCT_MAINTENANCE_PARTS_USED
+    dimensions:
+      - name: LOG_ID
+        description: Foreign key to FCT_MAINTENANCE_LOG.
+        expr: LOG_ID
+        data_type: NUMBER(38,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: MATERIAL_ID
+        description: Foreign key to DIM_MATERIAL.
+        expr: MATERIAL_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+    facts:
+      - name: QUANTITY_USED
+        description: The quantity of material used in the maintenance activity.
+        expr: QUANTITY_USED
+        data_type: NUMBER(8,2)
+        sample_values:
+          - '2.00'
+          - '1.50'
+          - '3.25'
+      - name: TOTAL_COST
+        description: The total cost of the material used.
+        expr: TOTAL_COST
+        data_type: NUMBER(10,2)
+        sample_values:
+          - '251.00'
+          - '68.63'
+          - '290.06'
+    primary_key:
+      columns:
+        - LOG_ID
+        - MATERIAL_ID
+  - name: FCT_BUDGET
+    base_table:
+      database: HYPERFORGE
+      schema: SILVER
+      table: FCT_BUDGET
+    dimensions:
+      - name: BUDGET_ID
+        description: Unique identifier for a budget entry.
+        expr: BUDGET_ID
+        data_type: INTEGER
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+      - name: PLANT_ID
+        description: Unique identifier for the plant this budget belongs to.
+        expr: PLANT_ID
+        data_type: NUMBER(10,0)
+        sample_values:
+          - '1'
+          - '2'
+      - name: YEAR
+        description: The year for this budget entry.
+        expr: YEAR
+        data_type: NUMBER(4,0)
+        sample_values:
+          - '2025'
+          - '2024'
+      - name: QUARTER
+        description: The quarter for this budget entry.
+        expr: QUARTER
+        data_type: NUMBER(1,0)
+        sample_values:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+      - name: BUDGET_TYPE
+        description: The type of budget, such as OpEx Maintenance or CapEx Project.
+        expr: BUDGET_TYPE
+        data_type: VARCHAR(50)
+        sample_values:
+          - OpEx Maintenance
+          - CapEx Project
+    facts:
+      - name: BUDGET_AMOUNT
+        description: The budget amount for this entry.
+        expr: BUDGET_AMOUNT
+        data_type: NUMBER(15,2)
+        sample_values:
+          - '450000.00'
+          - '125000.00'
+          - '550000.00'
+    primary_key:
+      columns:
+        - BUDGET_ID
 relationships:
-  - left_table: DIM_ASSET
+  - name: DIM_PROCESS__TO__DIM_LINE
+    left_table: DIM_PROCESS
     relationship_columns:
       - left_column: LINE_ID
         right_column: LINE_ID
     right_table: DIM_LINE
-    name: DIM_ASSET__TO__DIM_LINE
+  - name: DIM_ASSET__TO__DIM_PROCESS
+    left_table: DIM_ASSET
+    relationship_columns:
+      - left_column: PROCESS_ID
+        right_column: PROCESS_ID
+    right_table: DIM_PROCESS
   - name: DIM_ASSET__TO__DIM_ASSET_CLASS
     left_table: DIM_ASSET
     relationship_columns:
       - left_column: ASSET_CLASS_ID
         right_column: ASSET_CLASS_ID
     right_table: DIM_ASSET_CLASS
-  - left_table: DIM_SENSOR
+  - name: DIM_SENSOR__TO__DIM_ASSET
+    left_table: DIM_SENSOR
     relationship_columns:
       - left_column: ASSET_ID
         right_column: ASSET_ID
     right_table: DIM_ASSET
-    name: DIM_SENSOR__TO__DIM_ASSET
   - name: DIM_LINE__TO__DIM_PLANT
     left_table: DIM_LINE
     relationship_columns:
@@ -734,6 +1118,12 @@ relationships:
       - left_column: ASSET_ID
         right_column: ASSET_ID
     right_table: DIM_ASSET
+  - name: FCT_ASSET_TELEMETRY__TO__DIM_PROCESS
+    left_table: FCT_ASSET_TELEMETRY
+    relationship_columns:
+      - left_column: PROCESS_ID
+        right_column: PROCESS_ID
+    right_table: DIM_PROCESS
   - name: FCT_ASSET_TELEMETRY__TO__DIM_DATE
     left_table: FCT_ASSET_TELEMETRY
     relationship_columns:
@@ -746,27 +1136,69 @@ relationships:
       - left_column: ASSET_ID
         right_column: ASSET_ID
     right_table: DIM_ASSET
+  - name: FCT_MAINTENANCE_LOG__TO__DIM_PROCESS
+    left_table: FCT_MAINTENANCE_LOG
+    relationship_columns:
+      - left_column: PROCESS_ID
+        right_column: PROCESS_ID
+    right_table: DIM_PROCESS
   - name: FCT_MAINTENANCE_LOG__TO__DIM_WORK_ORDER_TYPE
     left_table: FCT_MAINTENANCE_LOG
     relationship_columns:
       - left_column: WO_TYPE_ID
         right_column: WO_TYPE_ID
     right_table: DIM_WORK_ORDER_TYPE
+  - name: FCT_MAINTENANCE_LOG__TO__DIM_TECHNICIAN
+    left_table: FCT_MAINTENANCE_LOG
+    relationship_columns:
+      - left_column: TECHNICIAN_ID
+        right_column: TECHNICIAN_ID
+    right_table: DIM_TECHNICIAN
+  - name: FCT_MAINTENANCE_LOG__TO__DIM_FAILURE_CODE
+    left_table: FCT_MAINTENANCE_LOG
+    relationship_columns:
+      - left_column: FAILURE_CODE_ID
+        right_column: FAILURE_CODE_ID
+    right_table: DIM_FAILURE_CODE
   - name: FCT_MAINTENANCE_LOG__TO__DIM_DATE
     left_table: FCT_MAINTENANCE_LOG
     relationship_columns:
       - left_column: ACTION_DATE_SK
         right_column: DATE_SK
     right_table: DIM_DATE
+  - name: FCT_MAINTENANCE_PARTS_USED__TO__FCT_MAINTENANCE_LOG
+    left_table: FCT_MAINTENANCE_PARTS_USED
+    relationship_columns:
+      - left_column: LOG_ID
+        right_column: LOG_ID
+    right_table: FCT_MAINTENANCE_LOG
+  - name: FCT_MAINTENANCE_PARTS_USED__TO__DIM_MATERIAL
+    left_table: FCT_MAINTENANCE_PARTS_USED
+    relationship_columns:
+      - left_column: MATERIAL_ID
+        right_column: MATERIAL_ID
+    right_table: DIM_MATERIAL
   - name: FCT_PRODUCTION_LOG__TO__DIM_ASSET
     left_table: FCT_PRODUCTION_LOG
     relationship_columns:
       - left_column: ASSET_ID
         right_column: ASSET_ID
     right_table: DIM_ASSET
+  - name: FCT_PRODUCTION_LOG__TO__DIM_PROCESS
+    left_table: FCT_PRODUCTION_LOG
+    relationship_columns:
+      - left_column: PROCESS_ID
+        right_column: PROCESS_ID
+    right_table: DIM_PROCESS
   - name: FCT_PRODUCTION_LOG__TO__DIM_DATE
     left_table: FCT_PRODUCTION_LOG
     relationship_columns:
       - left_column: DATE_SK
         right_column: DATE_SK
     right_table: DIM_DATE
+  - name: FCT_BUDGET__TO__DIM_PLANT
+    left_table: FCT_BUDGET
+    relationship_columns:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    right_table: DIM_PLANT

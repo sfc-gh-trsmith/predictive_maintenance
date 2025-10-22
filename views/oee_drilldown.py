@@ -44,7 +44,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from utils.data_loader import run_query
-from utils.helpers import calculate_oee
+from utils.calculations import calculate_oee
 
 def show_page():
     """Renders the OEE Drill-Down page."""
@@ -53,16 +53,20 @@ def show_page():
     # --- On-Demand Data Loading ---
     # This single, comprehensive query fetches all data needed for the OEE hierarchy.
     query = """
-        SELECT
+  SELECT
             P.PLANT_NAME,
             L.LINE_NAME,
+            PR.PROCESS_NAME,
+            A.ASSET_NAME,
+            A.ASSET_UNS_NK,
             PL.PLANNED_RUNTIME_HOURS,
             PL.ACTUAL_RUNTIME_HOURS,
             PL.UNITS_PRODUCED,
             PL.UNITS_SCRAPPED
         FROM HYPERFORGE.SILVER.FCT_PRODUCTION_LOG PL
         JOIN HYPERFORGE.SILVER.DIM_ASSET A ON PL.ASSET_ID = A.ASSET_ID AND A.IS_CURRENT = TRUE
-        JOIN HYPERFORGE.SILVER.DIM_LINE L ON A.LINE_ID = L.LINE_ID
+        JOIN HYPERFORGE.SILVER.DIM_PROCESS PR ON PR.PROCESS_ID = A.PROCESS_ID
+        JOIN HYPERFORGE.SILVER.DIM_LINE L ON PR.LINE_ID = L.LINE_ID
         JOIN HYPERFORGE.SILVER.DIM_PLANT P ON L.PLANT_ID = P.PLANT_ID;
     """
     df = run_query(query)
