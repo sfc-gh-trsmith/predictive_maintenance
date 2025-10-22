@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Factory Floor Visualization</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #111; }
+        canvas { display: block; }
+        #detail-panel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background-color: rgba(40, 40, 40, 0.9);
+            color: #fff;
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid #555;
+            display: none; /* Hidden by default */
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            transition: opacity 0.3s;
+        }
+        #detail-panel h2 {
+            margin-top: 0;
+            color: #4CAF50; /* Green by default */
+            border-bottom: 1px solid #555;
+            padding-bottom: 10px;
+        }
+        #detail-panel p {
+            margin: 10px 0;
+            line-height: 1.4;
+        }
+        #detail-panel strong {
+            color: #aaa;
+        }
+        #detail-panel .sensor-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        #detail-panel .sensor-item {
+            background-color: #333;
+            padding: 8px;
+            border-radius: 4px;
+            text-align: center;
+        }
+        #close-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+        }
+        #legend-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background-color: rgba(40, 40, 40, 0.85);
+            color: #fff;
+            padding: 0 20px;
+            border-bottom: 1px solid #555;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 100;
+        }
+        #legend-panel h3 {
+            margin: 0;
+            color: #4CAF50;
+            font-size: 16px;
+            margin-right: 20px;
+        }
+        #legend-items {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex: 1;
+        }
+        #legend-panel .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+        }
+        #legend-panel .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+        #reset-camera-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.3s;
+        }
+        #reset-camera-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="legend-panel">
+        <h3>3D Factory Floor Visualization</h3>
+        <div id="legend-items">
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #2196F3;"></div>
+                <span>Process Step</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #4CAF50;"></div>
+                <span>Flow Line</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #FF6B35;"></div>
+                <span>Dependencies</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #aaaaaa;"></div>
+                <span>Conveyor</span>
+            </div>
+            <div class="legend-item" style="margin-left: 10px; color: #aaa;">
+                Live Data from Snowflake
+            </div>
+        </div>
+        <button id="reset-camera-btn">Reset Camera</button>
+    </div>
+
+    <div id="detail-panel">
+        <button id="close-button">&times;</button>
+        <h2 id="asset-name">Asset Name</h2>
+        <p><strong>Status:</strong> <span id="asset-status"></span></p>
+        <p><strong>Health Score:</strong> <span id="asset-health"></span></p>
+        <p><strong>Prob. of Failure (30d):</strong> <span id="asset-pof"></span></p>
+        <p><strong>Est. Downtime Cost:</strong> <span id="asset-cost"></span></p>
+        <hr style="border-color: #555;">
+        <h3>Live Sensors</h3>
+        <div class="sensor-grid" id="asset-sensors">
+            </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- 1. LIVE DATA (Dynamic from Snowflake) ---
+        // This will be replaced by the Python code with actual data
+        const factoryData = __REPLACE_WITH_LIVE_DATA__;
+        console.log('Factory data:', factoryData);
+
+
+        // --- 2. SCENE SETUP ---
+        let scene, camera, renderer, controls;
+        let raycaster, mouse;
+        const clickableObjects = []; // To store assets for raycasting
+        let defaultCameraPosition = new THREE.Vector3();
+        let defaultCameraTarget = new THREE.Vector3();
+
+        function init() {
+            console.log('Initializing Three.js scene...');
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x282c34);
+            scene.fog = new THREE.Fog(0x282c34, 10, 100);
+            console.log('Scene created:', scene);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(10, 15, 25); // Temporary, will be set by fitCameraToScene
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+            console.log('Renderer created and added to DOM');
+
+            // Controls
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.08;
+            controls.target.set(10, 0, 0); // Temporary, will be set by fitCameraToScene
+            
+            // Constrain controls
+            controls.minPolarAngle = Math.PI / 6; // 30 degrees from top
+            controls.maxPolarAngle = Math.PI / 2.2; // Don't go below horizon
+            controls.minDistance = 10;
+            controls.maxDistance = 80;
+            controls.enablePan = true;
+            controls.panSpeed = 0.5;
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(15, 20, 10);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            // Floor
+            const floorGeometry = new THREE.PlaneGeometry(100, 100);
+            const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x4a4a4a });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            
+            // Raycasting setup
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            // --- 3. CREATE FACTORY LAYOUT ---
+            try {
+                console.log('About to create factory layout with:', factoryData);
+                createFactoryLayout(factoryData);
+                console.log('Factory layout created successfully');
+            } catch (error) {
+                console.error('Error creating factory layout:', error);
+                document.body.innerHTML += '<div style="color: red; padding: 20px;">Error: ' + error.message + '</div>';
+            }
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('click', onDocumentMouseClick);
+            document.getElementById('close-button').addEventListener('click', () => {
+                document.getElementById('detail-panel').style.display = 'none';
+            });
+            document.getElementById('reset-camera-btn').addEventListener('click', resetCamera);
+            
+            // Fit camera to scene after layout is created
+            fitCameraToScene();
+            
+            animate();
+        }
+
+        // --- 4. LAYOUT AND VISUALIZATION LOGIC ---
+        function createFactoryLayout(data) {
+            console.log('Factory data received:', data);
+            const plant = data;
+            console.log('Plant:', plant);
+            const line = plant.children[0];
+            console.log('Line:', line);
+            const processes = line.children;
+            console.log('Processes:', processes);
+            
+            const PROCESS_SPACING = 15;
+            const ASSET_SPACING = 6;
+            const PROCESS_HEIGHT = 8; // Height for process labels and flow lines
+            
+            let lastAssetPosition = null;
+            const processPositions = []; // Store process center positions for dependency arrows
+
+            processes.forEach((process, processIndex) => {
+                const processGroup = new THREE.Group();
+                processGroup.position.x = processIndex * PROCESS_SPACING;
+                scene.add(processGroup);
+
+                // Add process label with step number
+                const processLabel = createProcessLabel(`${processIndex + 1}. ${process.name}`, processIndex * PROCESS_SPACING, PROCESS_HEIGHT, 0);
+                scene.add(processLabel);
+                
+                // Add step number indicator
+                const stepIndicator = createStepIndicator(processIndex + 1, processIndex * PROCESS_SPACING, PROCESS_HEIGHT - 1, 0);
+                scene.add(stepIndicator);
+
+                // Store process center position for dependency arrows
+                const processCenter = new THREE.Vector3(processIndex * PROCESS_SPACING, 0, 0);
+                processPositions.push(processCenter);
+
+                process.children.forEach((asset, assetIndex) => {
+                    const healthColor = getHealthColor(asset.healthScore);
+                    const geometry = new THREE.BoxGeometry(3, 5, 3);
+                    const material = new THREE.MeshStandardMaterial({ color: healthColor });
+                    const assetMesh = new THREE.Mesh(geometry, material);
+                    
+                    assetMesh.position.z = (assetIndex - (process.children.length -1) / 2) * ASSET_SPACING;
+                    assetMesh.castShadow = true;
+                    
+                    // Store data reference in the mesh itself
+                    assetMesh.userData = { id: asset.id, type: 'asset', data: asset };
+                    
+                    processGroup.add(assetMesh);
+                    clickableObjects.push(assetMesh);
+
+                    const currentAssetPosition = new THREE.Vector3();
+                    assetMesh.getWorldPosition(currentAssetPosition);
+                    currentAssetPosition.y = -2.4; // Position conveyor below asset
+
+                    // Draw conveyor line
+                    if (lastAssetPosition) {
+                        const points = [lastAssetPosition, currentAssetPosition];
+                        const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                        const lineMat = new THREE.LineBasicMaterial({ color: 0xaaaaaa, linewidth: 2 });
+                        const conveyorLine = new THREE.Line(lineGeo, lineMat);
+                        scene.add(conveyorLine);
+                    }
+                    lastAssetPosition = currentAssetPosition;
+                });
+
+                // Draw process flow line horizontally across assets
+                // Calculate the span of assets in the Z direction
+                const assetCount = process.children.length;
+                const zSpan = (assetCount - 1) * ASSET_SPACING;
+                const zStart = -zSpan / 2;
+                const zEnd = zSpan / 2;
+                
+                const flowLineStart = new THREE.Vector3(processIndex * PROCESS_SPACING, 3, zStart - 1);
+                const flowLineEnd = new THREE.Vector3(processIndex * PROCESS_SPACING, 3, zEnd + 1);
+                const flowLineGeo = new THREE.BufferGeometry().setFromPoints([flowLineStart, flowLineEnd]);
+                const flowLineMat = new THREE.LineBasicMaterial({ color: 0x4CAF50, linewidth: 3 });
+                const flowLine = new THREE.Line(flowLineGeo, flowLineMat);
+                scene.add(flowLine);
+            });
+
+            // Draw dependency arrows between processes
+            const ASSET_HEIGHT = 5; // Matches BoxGeometry height
+            const arrowHeight = ASSET_HEIGHT / 2; // Center of asset
+            
+            for (let i = 0; i < processPositions.length - 1; i++) {
+                const startPos = processPositions[i];
+                const endPos = processPositions[i + 1];
+                
+                // Create dependency arrow at center height of assets
+                const arrow = createDependencyArrow(
+                    startPos.x + 6, arrowHeight, startPos.z,
+                    endPos.x - 6, arrowHeight, endPos.z
+                );
+                scene.add(arrow);
+            }
+        }
+
+        function createProcessLabel(text, x, y, z) {
+            // Create a simple text label using a plane with texture
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 64;
+            
+            context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            context.fillStyle = '#ffffff';
+            context.font = '16px Arial';
+            context.textAlign = 'center';
+            context.fillText(text, canvas.width / 2, canvas.height / 2 + 5);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+            const geometry = new THREE.PlaneGeometry(8, 2);
+            const label = new THREE.Mesh(geometry, material);
+            
+            label.position.set(x, y, z);
+            label.lookAt(camera.position);
+            
+            return label;
+        }
+
+        function createStepIndicator(stepNumber, x, y, z) {
+            // Create a circular step indicator
+            const geometry = new THREE.SphereGeometry(0.8, 16, 16);
+            const material = new THREE.MeshBasicMaterial({ color: 0x2196F3 });
+            const sphere = new THREE.Mesh(geometry, material);
+            sphere.position.set(x, y, z);
+            
+            // Add step number text
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 64;
+            canvas.height = 64;
+            
+            context.fillStyle = 'rgba(0, 0, 0, 0)';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            
+            context.fillStyle = '#ffffff';
+            context.font = 'bold 24px Arial';
+            context.textAlign = 'center';
+            context.fillText(stepNumber.toString(), canvas.width / 2, canvas.height / 2 + 8);
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            const textMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+            const textGeometry = new THREE.PlaneGeometry(1.2, 1.2);
+            const textMesh = new THREE.Mesh(textGeometry, textMaterial);
+            textMesh.position.set(x, y, z + 0.9);
+            
+            const group = new THREE.Group();
+            group.add(sphere);
+            group.add(textMesh);
+            
+            return group;
+        }
+
+        function createDependencyArrow(startX, startY, startZ, endX, endY, endZ) {
+            const arrowGroup = new THREE.Group();
+            
+            // Create arrow line
+            const points = [
+                new THREE.Vector3(startX, startY, startZ),
+                new THREE.Vector3(endX, endY, endZ)
+            ];
+            const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+            const lineMat = new THREE.LineBasicMaterial({ color: 0xFF6B35, linewidth: 4 });
+            const arrowLine = new THREE.Line(lineGeo, lineMat);
+            arrowGroup.add(arrowLine);
+            
+            // Create arrow head
+            const direction = new THREE.Vector3(endX - startX, endY - startY, endZ - startZ).normalize();
+            const arrowHead = new THREE.ConeGeometry(0.5, 1.5, 8);
+            const arrowHeadMat = new THREE.MeshBasicMaterial({ color: 0xFF6B35 });
+            const arrowHeadMesh = new THREE.Mesh(arrowHead, arrowHeadMat);
+            
+            // Position arrow head at the end
+            arrowHeadMesh.position.set(endX, endY, endZ);
+            arrowHeadMesh.lookAt(endX + direction.x, endY + direction.y, endZ + direction.z);
+            arrowHeadMesh.rotateX(Math.PI / 2);
+            
+            arrowGroup.add(arrowHeadMesh);
+            
+            return arrowGroup;
+        }
+
+        function getHealthColor(score) {
+            if (score > 0.8) return new THREE.Color(0x4CAF50); // Green
+            if (score > 0.5) return new THREE.Color(0xFFC107); // Yellow
+            return new THREE.Color(0xF44336); // Red
+        }
+
+        // --- 5. INTERACTIVITY ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onDocumentMouseClick(event) {
+            // Calculate mouse position in normalized device coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = - (event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(clickableObjects);
+
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+                if (clickedObject.userData.type === 'asset') {
+                    displayAssetDetails(clickedObject.userData.data);
+                }
+            } else {
+                // Close the detail panel if clicking outside any asset
+                document.getElementById('detail-panel').style.display = 'none';
+            }
+        }
+        
+        // --- 6. UI UPDATE ---
+        function displayAssetDetails(assetData) {
+            const panel = document.getElementById('detail-panel');
+            const nameEl = document.getElementById('asset-name');
+            
+            nameEl.textContent = assetData.name;
+            nameEl.style.color = getHealthColor(assetData.healthScore).getStyle();
+            
+            document.getElementById('asset-status').textContent = assetData.status;
+            document.getElementById('asset-health').textContent = `${(assetData.healthScore * 100).toFixed(1)}%`;
+            document.getElementById('asset-pof').textContent = assetData.pof;
+            document.getElementById('asset-cost').textContent = assetData.cost;
+            
+            const sensorsContainer = document.getElementById('asset-sensors');
+            sensorsContainer.innerHTML = ''; // Clear previous sensors
+            
+            assetData.children.forEach(sensor => {
+                const sensorEl = document.createElement('div');
+                sensorEl.className = 'sensor-item';
+                sensorEl.innerHTML = `
+                    <strong>${sensor.type}</strong><br>
+                    ${sensor.value} ${sensor.unit}
+                `;
+                if(sensor.status !== 'normal') {
+                    sensorEl.style.outline = sensor.status === 'warning' ? '2px solid #FFC107' : '2px solid #F44336';
+                }
+                sensorsContainer.appendChild(sensorEl);
+            });
+            
+            panel.style.display = 'block';
+        }
+
+        // --- 7. CAMERA POSITIONING ---
+        function fitCameraToScene() {
+            if (clickableObjects.length === 0) {
+                console.warn('No objects to fit camera to');
+                return;
+            }
+
+            // Calculate bounding box of all assets
+            const box = new THREE.Box3();
+            clickableObjects.forEach(obj => {
+                box.expandByObject(obj);
+            });
+
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+
+            // Calculate optimal camera distance
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraDistance = Math.abs(maxDim / Math.sin(fov / 2));
+            
+            // Add padding (1.1x for closer initial view)
+            cameraDistance *= 1.1;
+
+            // Position camera at 45-degree angle (isometric view)
+            const angle = Math.PI / 4; // 45 degrees
+            const cameraHeight = cameraDistance * 0.6; // Elevated view
+            const cameraHorizontalDist = cameraDistance * 0.8;
+
+            defaultCameraPosition.set(
+                center.x + cameraHorizontalDist * Math.cos(angle),
+                center.y + cameraHeight,
+                center.z + cameraHorizontalDist * Math.sin(angle)
+            );
+            defaultCameraTarget.copy(center);
+
+            // Apply the camera position
+            camera.position.copy(defaultCameraPosition);
+            controls.target.copy(defaultCameraTarget);
+            controls.update();
+
+            console.log('Camera fitted to scene:', {
+                position: defaultCameraPosition,
+                target: defaultCameraTarget,
+                boundingBox: { center, size }
+            });
+        }
+
+        function resetCamera() {
+            // Smoothly animate camera back to default position
+            const duration = 1000; // 1 second
+            const startPos = camera.position.clone();
+            const startTarget = controls.target.clone();
+            const startTime = Date.now();
+
+            function animateCamera() {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                // Easing function (ease-in-out)
+                const eased = progress < 0.5
+                    ? 2 * progress * progress
+                    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+
+                camera.position.lerpVectors(startPos, defaultCameraPosition, eased);
+                controls.target.lerpVectors(startTarget, defaultCameraTarget, eased);
+                controls.update();
+
+                if (progress < 1) {
+                    requestAnimationFrame(animateCamera);
+                }
+            }
+
+            animateCamera();
+        }
+
+        // --- 8. ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+
+    </script>
+</body>
+</html>
