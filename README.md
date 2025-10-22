@@ -189,8 +189,7 @@ Before deploying the application, ensure you have:
 ### Step 1: Clone the Repository
 
 ```bash
-cd /Users/trsmith/Desktop/dev/mfg
-git clone <repository-url>
+git clone https://github.com/sfc-gh-trsmith/predictive_maintenance.git
 cd predictive_maintenance
 ```
 
