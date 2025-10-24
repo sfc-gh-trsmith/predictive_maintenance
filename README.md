@@ -470,9 +470,7 @@ For production deployment to Snowflake Native Apps or Streamlit in Snowflake (SP
 
 2. **Snowflake Native App**: Package as a Snowflake Native Application for distribution
 
-## License
 
-Copyright © 2025 SnowCore Industries. All rights reserved.
 
 ## Support
 

@@ -1,8 +1,12 @@
 import streamlit as st
 import logging
+import time
 from typing import List, Dict, Optional, Tuple
+from datetime import datetime
 from .cortex_analyst import SnowflakeCortexAnalyst, _get_cortex_client
 from .snowflake_intelligence import SnowflakeIntelligenceAgent, _get_intelligence_client
+from .conversation_manager import get_conversation_manager
+from .assistant_ui_components import SUGGESTED_QUESTIONS, get_contextual_suggestions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -105,22 +109,21 @@ def build_unified_widget(
     title: str = "SnowCore Industries Assistant 🤖",
     semantic_model_path: str = "HYPERFORGE.GOLD.SEMANTIC_VIEW_STAGE/HYPERFORGE_SV.yaml",
     initial_message: str = "Hi! I'm your intelligent manufacturing assistant. I can analyze data and help with maintenance operations.",
-    placeholder: str = "e.g., 'What assets have the highest risk?' or 'Create a work order for pump maintenance'"
+    placeholder: str = "e.g., 'What assets have the highest risk?' or 'Create a work order for pump maintenance'",
+    page_context: Optional[str] = None,
+    enable_suggested_questions: bool = True,
+    enable_conversation_controls: bool = True
 ):
     """
-    Unified widget that routes to Intelligence Agent (primary) or Cortex Analyst (fallback).
-    Interface is identical to the original cortex_analyst widget.
+    Enhanced unified widget with suggested questions, conversation controls, and full analytics.
+    Routes to Intelligence Agent (primary) or Cortex Analyst (fallback).
     """
-    st.subheader(title)
     
+    # Initialize client and conversation manager
     try:
         client = _get_unified_client()
-        
-        # Show current backend in debug mode
-        if st.secrets.get("debug", {}).get("show_backend", False):
-            backend = "Intelligence Agent" if client.use_intelligence else "Cortex Analyst"
-            st.caption(f"Backend: {backend}")
-            
+        conv_manager = get_conversation_manager(storage_backend="session")
+        conversation_id = conv_manager.get_conversation_id(page_context or "default")
     except Exception as e:
         st.error(f"Failed to initialize assistant: {e}")
         return
@@ -128,21 +131,108 @@ def build_unified_widget(
     messages_key = f"unified_messages_{semantic_model_path.replace('/', '_').replace('.', '_')}"
     
     if messages_key not in st.session_state:
-        st.session_state[messages_key] = [{"role": "assistant", "content": initial_message}]
+        st.session_state[messages_key] = [{
+            "role": "assistant",
+            "content": initial_message,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }]
     
-    # Create container for messages to ensure proper layout
+    # Header with title and controls
+    if enable_conversation_controls:
+        header_col1, header_col2, header_col3 = st.columns([10, 1, 1])
+    else:
+        header_col1 = st.container()
+    
+    with header_col1:
+        st.subheader(title)
+        
+        # Show backend indicator in debug mode
+        if st.secrets.get("debug", {}).get("show_backend", False):
+            backend = "Intelligence Agent" if client.use_intelligence else "Cortex Analyst"
+            st.caption(f"🔧 Backend: {backend}")
+    
+    if enable_conversation_controls:
+        # Export button
+        with header_col2:
+            if st.button("📤", key="export_conv", help="Export conversation"):
+                export_data = conv_manager.export_conversation(conversation_id, format="markdown")
+                st.download_button(
+                    label="Download",
+                    data=export_data,
+                    file_name=f"conversation_{conversation_id}.md",
+                    mime="text/markdown",
+                    key="download_md"
+                )
+        
+        # Clear button
+        with header_col3:
+            if st.button("🗑️", key="clear_conv", help="Clear conversation"):
+                if "confirm_clear" not in st.session_state:
+                    st.session_state["confirm_clear"] = False
+                
+                if not st.session_state["confirm_clear"]:
+                    st.session_state["confirm_clear"] = True
+                    st.toast("Click again to confirm clearing conversation")
+                else:
+                    st.session_state[messages_key] = [{
+                        "role": "assistant",
+                        "content": initial_message,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }]
+                    conv_manager.clear_conversation(conversation_id)
+                    st.session_state["confirm_clear"] = False
+                    st.rerun()
+    
+    st.divider()
+    
+    # Suggested questions section (collapsible, starts collapsed)
+    if enable_suggested_questions and len(st.session_state[messages_key]) <= 2:
+        with st.expander("💡 Need inspiration? Try these questions:", expanded=False):
+            _render_suggested_questions(
+                messages_key=messages_key,
+                page_context=page_context
+            )
+        st.divider()
+    
+    # Messages container
     messages_container = st.container()
     
     with messages_container:
         # Display conversation history
-        for message in st.session_state[messages_key]:
+        for i, message in enumerate(st.session_state[messages_key]):
             with st.chat_message(message["role"]):
                 st.markdown(message["content"], unsafe_allow_html=True)
-
-    # Handle user input - this stays at the bottom and triggers a rerun
-    if prompt := st.chat_input(placeholder):
-        # Add user message to session state immediately
-        st.session_state[messages_key].append({"role": "user", "content": prompt})
+                
+                # Optional: Add feedback buttons for assistant messages
+                if message["role"] == "assistant" and i > 0:
+                    _render_feedback_buttons(f"msg_{i}")
+    
+    # Check for pending question from suggested questions
+    pending_question = st.session_state.get("pending_question")
+    if pending_question:
+        del st.session_state["pending_question"]
+        prompt = pending_question
+    else:
+        prompt = st.chat_input(placeholder)
+    
+    # Process the prompt (either from chat input or suggested question)
+    if prompt:
+        start_time = time.time()
+        
+        # Add user message
+        user_message = {
+            "role": "user",
+            "content": prompt,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        st.session_state[messages_key].append(user_message)
+        
+        # Save to conversation manager
+        conv_manager.save_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=prompt
+        )
         
         # Display the user message immediately
         with messages_container:
@@ -153,14 +243,20 @@ def build_unified_widget(
             with st.chat_message("assistant"):
                 with st.spinner("🤖 Thinking..."):
                     try:
-                        # Prepare messages for API (filter out non-API roles if needed)
+                        # Prepare messages for API
                         api_messages = []
                         for msg in st.session_state[messages_key]:
                             if msg["role"] in ["user", "assistant"]:
                                 api_messages.append(msg)
                         
                         # Get response from unified client
-                        assistant_response, error_msg, api_content = client.get_complete_response(api_messages, semantic_model_path)
+                        assistant_response, error_msg, api_content = client.get_complete_response(
+                            api_messages,
+                            semantic_model_path
+                        )
+                        
+                        # Calculate response time
+                        response_time_ms = int((time.time() - start_time) * 1000)
                         
                         # Debug logging
                         logger.info(f"Assistant response received: {len(assistant_response) if assistant_response else 0} characters")
@@ -171,25 +267,91 @@ def build_unified_widget(
                             st.error(error_msg)
                         elif not assistant_response or assistant_response.strip() == "":
                             assistant_response = "I apologize, but I didn't receive a proper response. Please try asking your question again."
-                            st.warning("Empty response received - this may indicate a streaming parsing issue")
+                            st.warning("Empty response received")
                             logger.warning("Empty assistant response received")
                         
                         # Display the response
                         st.markdown(assistant_response, unsafe_allow_html=True)
                         
-                        # Add assistant response to session state with API content for followup
-                        assistant_msg = {"role": "assistant", "content": assistant_response}
+                        # Add assistant response to session state
+                        assistant_msg = {
+                            "role": "assistant",
+                            "content": assistant_response,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "backend_used": "Intelligence Agent" if client.use_intelligence else "Cortex Analyst",
+                            "response_time_ms": response_time_ms
+                        }
                         if api_content:
                             assistant_msg["api_content"] = api_content
                         st.session_state[messages_key].append(assistant_msg)
+                        
+                        # Save to conversation manager
+                        conv_manager.save_message(
+                            conversation_id=conversation_id,
+                            role="assistant",
+                            content=assistant_response,
+                            backend_used=assistant_msg["backend_used"],
+                            response_time_ms=response_time_ms
+                        )
+                        
+                        # Show performance metrics in debug mode
+                        if st.secrets.get("debug", {}).get("show_metrics", False):
+                            st.caption(f"⚡ Response time: {response_time_ms}ms | Backend: {assistant_msg['backend_used']}")
 
                     except Exception as e:
                         error_msg = f"🚨 Unexpected error: {str(e)}"
                         st.error(error_msg)
-                        st.session_state[messages_key].append({"role": "assistant", "content": error_msg})
+                        st.session_state[messages_key].append({
+                            "role": "assistant",
+                            "content": error_msg,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        })
         
         # Trigger a rerun to refresh the display
         st.rerun()
+
+
+def _render_suggested_questions(messages_key: str, page_context: Optional[str] = None):
+    """Render suggested questions that trigger API calls when clicked."""
+    suggestions = get_contextual_suggestions(page_context) if page_context else SUGGESTED_QUESTIONS
+    
+    for category, questions in suggestions.items():
+        st.markdown(f"**{category}**")
+        cols = st.columns(2)
+        for i, question in enumerate(questions[:4]):  # Limit to 4 per category
+            with cols[i % 2]:
+                if st.button(question, key=f"sq_{category}_{i}", use_container_width=True):
+                    # Set pending question to be processed
+                    st.session_state["pending_question"] = question
+                    st.rerun()
+
+
+def _render_feedback_buttons(message_id: str):
+    """Render simple feedback buttons for assistant messages."""
+    cols = st.columns([1, 1, 10])
+    
+    with cols[0]:
+        if st.button("👍", key=f"like_{message_id}", help="Helpful"):
+            _log_feedback(message_id, "positive")
+            st.toast("Thanks for your feedback!")
+    
+    with cols[1]:
+        if st.button("👎", key=f"dislike_{message_id}", help="Not helpful"):
+            _log_feedback(message_id, "negative")
+            st.toast("Thanks! We'll improve.")
+
+
+def _log_feedback(message_id: str, rating: str):
+    """Log feedback for continuous improvement."""
+    if "feedback_log" not in st.session_state:
+        st.session_state["feedback_log"] = []
+    
+    st.session_state["feedback_log"].append({
+        "message_id": message_id,
+        "rating": rating,
+        "timestamp": datetime.now().isoformat()
+    })
+    logger.info(f"Feedback logged: {message_id} - {rating}")
 
 
 # Legacy compatibility function

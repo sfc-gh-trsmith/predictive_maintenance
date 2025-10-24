@@ -36,7 +36,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from utils.data_loader import run_query
+from utils.data_loader import run_query, run_queries_parallel
 # Note: Cortex Analyst integration can be added later if needed
 
 def show_page():
@@ -102,23 +102,43 @@ def show_page():
     
     # --- Main Content ---
     if selected_asset:
-        # Get asset details
-        asset_details = get_asset_details(selected_asset)
-        
-        # Display asset overview
-        display_asset_overview(asset_details)
-        
-        # Get sensor data for the selected asset and date range
-        sensor_data = get_sensor_data(selected_asset, start_date, end_date)
-        
-        if not sensor_data.empty:
-            # Display sensor monitoring dashboard
-            display_sensor_dashboard(sensor_data, asset_details)
+        # Load all data in parallel for better performance
+        with st.spinner("Loading asset data..."):
+            # Prepare queries for parallel execution
+            asset_query = get_asset_details_query(selected_asset)
+            sensor_query = get_sensor_data_query(selected_asset, start_date, end_date)
+            maintenance_query = get_maintenance_data_query(selected_asset, start_date, end_date)
             
-            # Display maintenance history
-            display_maintenance_history(selected_asset, start_date, end_date)
+            # Execute queries in parallel
+            queries = {
+                'asset_details': asset_query,
+                'sensor_data': sensor_query,
+                'maintenance_data': maintenance_query
+            }
+            results = run_queries_parallel(queries, max_workers=3)
+            
+            # Extract results
+            asset_details_df = results['asset_details']
+            sensor_data = results['sensor_data']
+            maintenance_data = results['maintenance_data']
+        
+        # Process asset details
+        asset_details = asset_details_df.iloc[0] if not asset_details_df.empty else None
+        
+        if asset_details is not None:
+            # Display asset overview
+            display_asset_overview(asset_details)
+            
+            if not sensor_data.empty:
+                # Display sensor monitoring dashboard
+                display_sensor_dashboard(sensor_data, asset_details)
+                
+                # Display maintenance history
+                display_maintenance_history_from_data(maintenance_data)
+            else:
+                st.warning(f"No sensor data available for asset {selected_asset} in the selected time range.")
         else:
-            st.warning(f"No sensor data available for asset {selected_asset} in the selected time range.")
+            st.warning(f"Could not load details for asset {selected_asset}")
     else:
         st.info("Please select an asset to view detailed information.")
 
@@ -343,37 +363,42 @@ def get_hierarchy_data():
             ]
         })
 
+def get_asset_details_query(asset_id):
+    """Return SQL query for asset details (for parallel execution)."""
+    # Note: run_queries_parallel doesn't support params, so we format the query
+    return f"""
+        SELECT 
+            A.ASSET_ID,
+            A.ASSET_NAME,
+            A.MODEL,
+            A.OEM_NAME,
+            A.INSTALLATION_DATE,
+            A.DOWNTIME_IMPACT_PER_HOUR,
+            AC.CLASS_NAME,
+            P.PROCESS_NAME,
+            L.LINE_NAME,
+            PL.PLANT_NAME,
+            G.LATEST_HEALTH_SCORE,
+            G.AVG_FAILURE_PROBABILITY,
+            G.MIN_RUL_DAYS
+        FROM HYPERFORGE.SILVER.DIM_ASSET A
+        JOIN HYPERFORGE.SILVER.DIM_ASSET_CLASS AC ON A.ASSET_CLASS_ID = AC.ASSET_CLASS_ID
+        JOIN HYPERFORGE.SILVER.DIM_PROCESS P ON A.PROCESS_ID = P.PROCESS_ID
+        JOIN HYPERFORGE.SILVER.DIM_LINE L ON P.LINE_ID = L.LINE_ID
+        JOIN HYPERFORGE.SILVER.DIM_PLANT PL ON L.PLANT_ID = PL.PLANT_ID
+        LEFT JOIN (
+            SELECT ASSET_ID, LATEST_HEALTH_SCORE, AVG_FAILURE_PROBABILITY, MIN_RUL_DAYS
+            FROM HYPERFORGE.GOLD.AGG_ASSET_HOURLY_HEALTH
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY ASSET_ID ORDER BY HOUR_TIMESTAMP DESC) = 1
+        ) G ON A.ASSET_ID = G.ASSET_ID
+        WHERE A.ASSET_ID = {asset_id} AND A.IS_CURRENT = TRUE
+    """
+
 def get_asset_details(asset_id):
     """Get detailed information for a specific asset."""
     try:
-        query = """
-            SELECT 
-                A.ASSET_ID,
-                A.ASSET_NAME,
-                A.MODEL,
-                A.OEM_NAME,
-                A.INSTALLATION_DATE,
-                A.DOWNTIME_IMPACT_PER_HOUR,
-                AC.CLASS_NAME,
-                P.PROCESS_NAME,
-                L.LINE_NAME,
-                PL.PLANT_NAME,
-                G.LATEST_HEALTH_SCORE,
-                G.AVG_FAILURE_PROBABILITY,
-                G.MIN_RUL_DAYS
-            FROM HYPERFORGE.SILVER.DIM_ASSET A
-            JOIN HYPERFORGE.SILVER.DIM_ASSET_CLASS AC ON A.ASSET_CLASS_ID = AC.ASSET_CLASS_ID
-            JOIN HYPERFORGE.SILVER.DIM_PROCESS P ON A.PROCESS_ID = P.PROCESS_ID
-            JOIN HYPERFORGE.SILVER.DIM_LINE L ON P.LINE_ID = L.LINE_ID
-            JOIN HYPERFORGE.SILVER.DIM_PLANT PL ON L.PLANT_ID = PL.PLANT_ID
-            LEFT JOIN (
-                SELECT ASSET_ID, LATEST_HEALTH_SCORE, AVG_FAILURE_PROBABILITY, MIN_RUL_DAYS
-                FROM HYPERFORGE.GOLD.AGG_ASSET_HOURLY_HEALTH
-                QUALIFY ROW_NUMBER() OVER (PARTITION BY ASSET_ID ORDER BY HOUR_TIMESTAMP DESC) = 1
-            ) G ON A.ASSET_ID = G.ASSET_ID
-            WHERE A.ASSET_ID = %s AND A.IS_CURRENT = TRUE
-        """
-        result = run_query(query, params=[asset_id])
+        query = get_asset_details_query(asset_id)
+        result = run_query(query)
         return result.iloc[0] if not result.empty else None
     except Exception as e:
         st.warning(f"Database connection issue: {str(e)}. Using mock data.")
@@ -394,30 +419,34 @@ def get_asset_details(asset_id):
             'MIN_RUL_DAYS': 120
         })
 
+def get_sensor_data_query(asset_id, start_date, end_date):
+    """Return SQL query for sensor data (for parallel execution)."""
+    return f"""
+        SELECT 
+            S.SENSOR_SK,
+            S.SENSOR_NK,
+            S.SENSOR_TYPE,
+            S.UNITS_OF_MEASURE,
+            T.RECORDED_AT,
+            T.TEMPERATURE_C,
+            T.VIBRATION_MM_S,
+            T.PRESSURE_PSI,
+            T.HEALTH_SCORE,
+            T.FAILURE_PROBABILITY,
+            T.RUL_DAYS,
+            T.IS_ANOMALOUS
+        FROM HYPERFORGE.SILVER.DIM_SENSOR S
+        JOIN HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY T ON S.ASSET_ID = T.ASSET_ID
+        WHERE S.ASSET_ID = {asset_id} 
+        AND T.RECORDED_AT BETWEEN '{start_date}' AND '{end_date}'
+        ORDER BY T.RECORDED_AT DESC
+    """
+
 def get_sensor_data(asset_id, start_date, end_date):
     """Get sensor data for the specified asset and date range."""
     try:
-        query = """
-            SELECT 
-                S.SENSOR_SK,
-                S.SENSOR_NK,
-                S.SENSOR_TYPE,
-                S.UNITS_OF_MEASURE,
-                T.RECORDED_AT,
-                T.TEMPERATURE_C,
-                T.VIBRATION_MM_S,
-                T.PRESSURE_PSI,
-                T.HEALTH_SCORE,
-                T.FAILURE_PROBABILITY,
-                T.RUL_DAYS,
-                T.IS_ANOMALOUS
-            FROM HYPERFORGE.SILVER.DIM_SENSOR S
-            JOIN HYPERFORGE.SILVER.FCT_ASSET_TELEMETRY T ON S.ASSET_ID = T.ASSET_ID
-            WHERE S.ASSET_ID = %s 
-            AND T.RECORDED_AT BETWEEN %s AND %s
-            ORDER BY T.RECORDED_AT DESC
-        """
-        return run_query(query, params=[asset_id, start_date, end_date])
+        query = get_sensor_data_query(asset_id, start_date, end_date)
+        return run_query(query)
     except Exception as e:
         st.warning(f"Database connection issue: {str(e)}. Using mock data.")
         # Return mock sensor data for development/testing
@@ -566,11 +595,9 @@ def display_sensor_dashboard(sensor_data, asset_details):
                 else:
                     st.info(f"No data available for {sensor_type} sensors")
 
-def display_maintenance_history(asset_id, start_date, end_date):
-    """Display maintenance history for the asset."""
-    st.subheader("Maintenance History")
-    
-    query = """
+def get_maintenance_data_query(asset_id, start_date, end_date):
+    """Return SQL query for maintenance history (for parallel execution)."""
+    return f"""
         SELECT 
             ML.ACTION_DATE_SK,
             ML.COMPLETED_DATE,
@@ -586,12 +613,14 @@ def display_maintenance_history(asset_id, start_date, end_date):
         JOIN HYPERFORGE.SILVER.DIM_WORK_ORDER_TYPE WT ON ML.WO_TYPE_ID = WT.WO_TYPE_ID
         LEFT JOIN HYPERFORGE.SILVER.DIM_TECHNICIAN T ON ML.TECHNICIAN_ID = T.TECHNICIAN_ID
         LEFT JOIN HYPERFORGE.SILVER.DIM_FAILURE_CODE FC ON ML.FAILURE_CODE_ID = FC.FAILURE_CODE_ID
-        WHERE ML.ASSET_ID = %s
-        AND ML.COMPLETED_DATE BETWEEN %s AND %s
+        WHERE ML.ASSET_ID = {asset_id}
+        AND ML.COMPLETED_DATE BETWEEN '{start_date}' AND '{end_date}'
         ORDER BY ML.COMPLETED_DATE DESC
     """
-    
-    maintenance_data = run_query(query, params=[asset_id, start_date, end_date])
+
+def display_maintenance_history_from_data(maintenance_data):
+    """Display maintenance history from pre-loaded data."""
+    st.subheader("Maintenance History")
     
     if not maintenance_data.empty:
         # Display maintenance summary

@@ -4,7 +4,7 @@ import os
 import json
 import pandas as pd
 import hashlib
-from utils.data_loader import run_query
+from utils.data_loader import run_query, run_queries_parallel
 
 @st.fragment
 def render_visualization(selected_plant, selected_line, factory_data):

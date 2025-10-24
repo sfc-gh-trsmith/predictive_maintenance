@@ -76,6 +76,14 @@ class SnowflakeCortexAnalyst:
                     "content": msg["api_content"]
                 })
         
+        # CRITICAL: Ensure roles alternate (Cortex Analyst requirement)
+        # Filter out consecutive messages with the same role
+        api_messages = self._ensure_alternating_roles(api_messages)
+        
+        # Debug: Show message role sequence
+        role_sequence = [msg.get("role", "unknown") for msg in api_messages]
+        print(f"🔧 Message role sequence: {' -> '.join(role_sequence)}")
+        
         # Try with SQL execution enabled first
         request_body = {
             "messages": api_messages,
@@ -86,6 +94,46 @@ class SnowflakeCortexAnalyst:
         
         print(f"🔧 Calling Cortex Analyst API with {len(api_messages)} messages...")
         return self._make_api_request("/api/v2/cortex/analyst/message", request_body)
+    
+    def _ensure_alternating_roles(self, messages: List[Dict]) -> List[Dict]:
+        """
+        Ensure messages alternate between user and analyst roles.
+        Cortex Analyst API requires strict alternation.
+        
+        Args:
+            messages: List of messages with roles
+            
+        Returns:
+            Filtered list with alternating roles
+        """
+        if not messages:
+            return messages
+        
+        filtered = []
+        last_role = None
+        
+        for msg in messages:
+            current_role = msg.get("role")
+            
+            # Skip if same role as previous (keep only the last one of consecutive same-role messages)
+            if current_role == last_role:
+                # Replace the previous message with this one (keep most recent)
+                if filtered:
+                    filtered[-1] = msg
+                continue
+            
+            filtered.append(msg)
+            last_role = current_role
+        
+        # API must start with user message
+        if filtered and filtered[0].get("role") != "user":
+            filtered = filtered[1:]  # Remove leading analyst message
+        
+        # API must end with user message (we're asking for a response)
+        if filtered and filtered[-1].get("role") != "user":
+            logger.warning("Message list doesn't end with user message - this may cause issues")
+        
+        return filtered
 
     def get_complete_response(self, messages: List[Dict], semantic_model_path: str) -> Tuple[str, Optional[str], Optional[List]]:
         """
@@ -120,11 +168,17 @@ class SnowflakeCortexAnalyst:
             # If we have SQL, execute it with data_loader
             if sql_statement:
                 print("🔍 Executing SQL with data_loader...")
+                print(f"📝 SQL Query:\n{sql_statement}")
                 try:
                     df = run_query(sql_statement)
-                    print(f"📊 Query returned {len(df)} rows")
+                    print(f"📊 Query returned {len(df)} rows with {len(df.columns)} columns")
+                    print(f"📋 Column names: {list(df.columns)}")
                     
                     if len(df) > 0:
+                        # Debug: Show first row to understand data structure
+                        if len(df) > 0:
+                            print(f"🔍 First row sample: {df.iloc[0].to_dict()}")
+                        
                         formatted_results = self._format_results(df, interpretation)
                         return formatted_results, None, content
                     else:
@@ -138,22 +192,60 @@ class SnowflakeCortexAnalyst:
         return str(response), None, None
     
     def _format_results(self, df: pd.DataFrame, interpretation: str) -> str:
-        """Format DataFrame results for display."""
-        formatted = f"**{interpretation}**\n\n📊 **Query Results ({len(df)} assets found):**\n\n"
+        """
+        Format DataFrame results for display.
+        Dynamically handles whatever columns are returned.
+        """
+        formatted = f"**{interpretation}**\n\n📊 **Query Results ({len(df)} rows):**\n\n"
+        
+        # Get column names (case-insensitive mapping)
+        cols_lower = {col.upper(): col for col in df.columns}
         
         for idx, row in df.head(10).iterrows():
-            formatted += f"**{idx + 1}. {row.get('ASSET_NAME', 'Asset')}**\n"
-            formatted += f"   • Model: {row.get('MODEL', 'N/A')} ({row.get('OEM_NAME', 'N/A')})\n"
-            if 'AVG_FAILURE_PROB' in row:
-                formatted += f"   • Risk Score: {row.get('AVG_FAILURE_PROB', 0):.3f} failure probability\n"
-            if 'AVG_HEALTH_SCORE' in row:
-                formatted += f"   • Health Score: {row.get('AVG_HEALTH_SCORE', 0):.1f}%\n"
-            if 'DOWNTIME_IMPACT_PER_HOUR' in row:
-                formatted += f"   • Downtime Impact: ${row.get('DOWNTIME_IMPACT_PER_HOUR', 0):,.2f}/hour\n"
+            # Try to find an identifier column (asset name, ID, etc.)
+            identifier = None
+            for name_col in ['ASSET_NAME', 'NAME', 'ASSET_ID', 'ID']:
+                if name_col in cols_lower:
+                    identifier = row[cols_lower[name_col]]
+                    break
+            
+            if identifier:
+                formatted += f"**{idx + 1}. {identifier}**\n"
+            else:
+                formatted += f"**{idx + 1}. Row {idx + 1}**\n"
+            
+            # Display all columns in the result
+            for col in df.columns:
+                col_upper = col.upper()
+                value = row[col]
+                
+                # Skip the identifier column (already displayed)
+                if identifier and value == identifier:
+                    continue
+                
+                # Format based on column name and value type
+                if pd.isna(value) or value is None:
+                    continue  # Skip null values
+                
+                # Format numbers nicely
+                if isinstance(value, (int, float)):
+                    if 'PROB' in col_upper or 'RISK' in col_upper:
+                        formatted += f"   • {col}: {value:.3f}\n"
+                    elif 'SCORE' in col_upper or 'PERCENT' in col_upper:
+                        formatted += f"   • {col}: {value:.1f}%\n"
+                    elif 'COST' in col_upper or 'IMPACT' in col_upper or 'PRICE' in col_upper:
+                        formatted += f"   • {col}: ${value:,.2f}\n"
+                    elif 'HOURS' in col_upper or 'DAYS' in col_upper:
+                        formatted += f"   • {col}: {value:.1f}\n"
+                    else:
+                        formatted += f"   • {col}: {value:,.2f}\n"
+                else:
+                    formatted += f"   • {col}: {value}\n"
+            
             formatted += "\n"
         
         if len(df) > 10:
-            formatted += f"... and {len(df) - 10} more assets\n"
+            formatted += f"... and {len(df) - 10} more rows\n"
         
         return formatted
 

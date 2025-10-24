@@ -2,7 +2,13 @@ import streamlit as st
 import pandas as pd
 from snowflake.connector import connect
 import os
-from typing import Any, Optional
+from typing import Any, Optional, Dict, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @st.cache_resource
 def init_connection():
@@ -20,6 +26,74 @@ def run_query(query: str, params: list = None) -> pd.DataFrame:
         else:
             cur.execute(query)
         return cur.fetch_pandas_all()
+
+
+def run_queries_parallel(
+    queries: Dict[str, str], 
+    max_workers: int = 4,
+    return_empty_on_error: bool = True
+) -> Dict[str, pd.DataFrame]:
+    """
+    Execute multiple independent queries in parallel using ThreadPoolExecutor.
+    
+    Args:
+        queries: Dictionary mapping result names to SQL query strings
+                 Example: {'sales': 'SELECT * FROM sales', 'products': 'SELECT * FROM products'}
+        max_workers: Maximum number of concurrent query threads (default: 4)
+        return_empty_on_error: If True, returns empty DataFrame on error; if False, raises exception
+        
+    Returns:
+        Dictionary mapping result names to DataFrames
+        
+    Example:
+        queries = {
+            'enterprise_ts': enterprise_timeseries_query,
+            'plant_ts': plant_timeseries_query,
+            'gold_data': gold_data_query
+        }
+        results = run_queries_parallel(queries)
+        enterprise_ts = results['enterprise_ts']
+    """
+    import time
+    start_time = time.time()
+    
+    results = {}
+    errors = {}
+    
+    # Use ThreadPoolExecutor to run queries in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all queries
+        future_to_name = {
+            executor.submit(run_query, query): name 
+            for name, query in queries.items()
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_name):
+            name = future_to_name[future]
+            try:
+                result = future.result()
+                results[name] = result
+                logger.info(f"✓ Query '{name}' completed: {len(result)} rows")
+            except Exception as e:
+                error_msg = f"Query '{name}' failed: {str(e)}"
+                logger.error(error_msg)
+                errors[name] = str(e)
+                
+                if return_empty_on_error:
+                    results[name] = pd.DataFrame()
+                else:
+                    raise Exception(error_msg) from e
+    
+    elapsed_time = time.time() - start_time
+    logger.info(f"⚡ Parallel query execution completed in {elapsed_time:.2f}s")
+    
+    # Show errors in UI if any occurred
+    if errors and st._is_running_with_streamlit:
+        for name, error in errors.items():
+            st.warning(f"⚠️ Query '{name}' failed: {error}")
+    
+    return results
 
 # -----------------------------
 # HTTP auth helpers for Snowflake REST endpoints (Cortex/Intelligence)

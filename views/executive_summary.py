@@ -44,7 +44,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
-from utils.data_loader import run_query
+from utils.data_loader import run_query, run_queries_parallel
 from utils.calculations import calculate_oee
 
 def show_page():
@@ -195,15 +195,30 @@ def show_page():
     # 7. Asset dimension for risk calculations
     asset_dim_query = "SELECT ASSET_ID, DOWNTIME_IMPACT_PER_HOUR FROM HYPERFORGE.SILVER.DIM_ASSET WHERE IS_CURRENT = TRUE;"
 
-    # --- DATA LOADING ---
+    # --- DATA LOADING (PARALLEL EXECUTION) ---
     with st.spinner("Loading executive dashboard data..."):
-        enterprise_ts = run_query(enterprise_timeseries_query)
-        plant_ts = run_query(plant_timeseries_query)
-        plant_current = run_query(plant_current_query)
-        gold_data = run_query(gold_data_query)
-        health_ts = run_query(health_timeseries_query)
-        cost_by_type = run_query(maintenance_cost_query)
-        asset_dim = run_query(asset_dim_query)
+        # Run all 7 queries in parallel for maximum performance
+        queries = {
+            'enterprise_ts': enterprise_timeseries_query,
+            'plant_ts': plant_timeseries_query,
+            'plant_current': plant_current_query,
+            'gold_data': gold_data_query,
+            'health_ts': health_timeseries_query,
+            'cost_by_type': maintenance_cost_query,
+            'asset_dim': asset_dim_query
+        }
+        
+        # Execute all queries in parallel (max 4 concurrent connections)
+        results = run_queries_parallel(queries, max_workers=4)
+        
+        # Extract results
+        enterprise_ts = results['enterprise_ts']
+        plant_ts = results['plant_ts']
+        plant_current = results['plant_current']
+        gold_data = results['gold_data']
+        health_ts = results['health_ts']
+        cost_by_type = results['cost_by_type']
+        asset_dim = results['asset_dim']
 
     # --- SECTION 1: TOP-LEVEL KPI CARDS WITH SPARKLINES ---
     st.subheader("Key Performance Indicators")
